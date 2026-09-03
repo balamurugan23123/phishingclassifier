@@ -51,8 +51,9 @@ def test_cache_written_atomically(tmp_path, monkeypatch):
     assert leftovers == []
 
 
-def test_vt_free_tier_pacing(monkeypatch):
+def test_vt_free_tier_pacing(monkeypatch, tmp_path):
     monkeypatch.setenv("VT_API_KEY", "dummy-key")
+    monkeypatch.chdir(tmp_path)  # isolate from any real .env: no live calls
     state = EnrichmentState()
     slept = []
     monkeypatch.setattr("time.sleep", lambda s: slept.append(s))
@@ -70,8 +71,9 @@ def test_vt_free_tier_pacing(monkeypatch):
     assert slept[0] <= VT_MIN_INTERVAL
 
 
-def test_urlscan_search_mode_only(monkeypatch):
+def test_urlscan_search_mode_only(monkeypatch, tmp_path):
     monkeypatch.setenv("URLSCAN_API_KEY", "dummy-key")
+    monkeypatch.chdir(tmp_path)  # isolate from any real .env: no live calls
     state = EnrichmentState()
     called_urls = []
 

@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE = MODEL_DIR / "phish_model.joblib"
 MAX_TFIDF_FEATURES = 300
+# Below this row count gradient boosting cannot learn (each leaf needs
+# samples); the trainer switches to logistic regression instead.
+SMALL_DATA_ROWS = 200
 
 KNOWN_SIGNAL_IDS = [
     "spf_fail", "dkim_fail", "dmarc_fail", "auth_header_absent",
@@ -85,23 +88,38 @@ def levenshtein(a: str, b: str, cap: int = 2) -> int:
 
 def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
                     max_distance: int = 2) -> Optional[str]:
-    """Check if host is a near-miss of a known brand."""
+    """Return the brand token if host is a near-miss of a known brand.
+
+    Checks each dot/hyphen-separated label of the host (normalized for
+    confusables) against brand tokens, skipping labels that are generic
+    hosting vocabulary ('www', 'mail', 'login', 'secure', ...). Exact
+    matches of genuine brand domains are never flagged.
+    """
     from .heuristics import BRANDS as _B
 
     if brands is None:
         brands = _B
     if not host:
         return None
-    parts = host.rstrip(".").split(".")
-    if len(parts) < 2:
-        return None
-    sld = normalize_confusables("".join(parts[:-1]))
-    for brand, legit in brands.items():
-        if sld == brand or host.lower() in legit:
+    host_l = host.lower().rstrip(".")
+    # genuine brand domain -> never a lookalike
+    for legit in brands.values():
+        if host_l in [d.lower() for d in legit]:
+            return None
+    generic = {"www", "mail", "login", "secure", "verify", "account",
+              "accounts", "portal", "auth", "id", "support", "signin",
+              "email", "webmail", "smtp", "imap", "mx"}
+    labels = re.split(r"[.\-]+", host_l)
+    for label in labels:
+        if not label or len(label) < 4 or label in generic:
             continue
-        for ref in {brand, normalize_confusables(legit[0].split(".")[0])}:
-            if len(ref) >= 4 and levenshtein(sld, ref, max_distance) <= max_distance:
-                return brand
+        norm = normalize_confusables(label)
+        for brand, legit in brands.items():
+            refs = {brand, normalize_confusables(
+                legit[0].split(".")[0])}
+            for ref in refs:
+                if len(ref) >= 4 and levenshtein(norm, ref, max_distance) <= max_distance:
+                    return brand
     return None
 
 
@@ -185,20 +203,31 @@ def save_model(pipe) -> None:
 
 
 def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Train ML model on labeled rows."""
+    """Train on [{parsed, label, source}] entries; returns eval metrics.
+
+    Design: engineered features (DictVectorizer) hstacked with TF-IDF word
+    n-grams, then a linear or boosted classifier depending on data size —
+    gradient boosting cannot learn from tiny datasets (its leaves need
+    samples), so < SMALL_DATA_ROWS uses LogisticRegression (which also
+    gives well-calibrated probabilities), larger sets use
+    HistGradientBoosting. Stratified 5-fold CV gives the honest
+    out-of-sample estimate; the final model is fit on all rows.
+    """
     import numpy as np
-    from sklearn.ensemble import HistGradientBoostingClassifier
+    import scipy.sparse as sp
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.model_selection import cross_val_score
-    from sklearn.pipeline import FeatureUnion, Pipeline
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
 
     labeled = [r for r in rows if r.get("label") in (0, 1)]
     if len(labeled) < 10:
-        raise ValueError("Need >= 10 labeled rows to train")
+        raise ValueError("Need >= 10 labeled rows to train (have %d)"
+                          % len(labeled))
     classes = {r["label"] for r in labeled}
     if classes != {0, 1}:
-        raise ValueError("Both classes (0 and 1) required")
+        raise ValueError("Both classes (0 and 1) required; got %s" % classes)
 
     from .heuristics import analyze_signals
 
@@ -212,63 +241,65 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         X_text.append(_text_for_tfidf(parsed))
         y.append(r["label"])
 
-    class _RowPicker:
-        def __init__(self, which: str):
-            self.which = which
+    vec = DictVectorizer(sparse=False)
+    tfidf = TfidfVectorizer(
+        ngram_range=(1, 2), max_features=MAX_TFIDF_FEATURES,
+        sublinear_tf=True, strip_accents="unicode", stop_words="english",
+        min_df=1,
+    )
+    F = vec.fit_transform(X_feats)
+    T = tfidf.fit_transform(X_text)
+    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    y_arr = np.array(y)
 
-        def transform(self, X, y=None):
-            return X[self.which]
+    if len(labeled) < SMALL_DATA_ROWS:
+        clf = LogisticRegression(max_iter=2000, C=1.0, random_state=42)
+        model_kind = "ml-logreg"
+    else:
+        clf = HistGradientBoostingClassifier(
+            max_iter=200, learning_rate=0.1, random_state=42,
+        )
+        model_kind = "ml-gbdt"
 
-    pipe = Pipeline([
-        ("features", FeatureUnion([
-            ("engineered", Pipeline([
-                ("pick", _RowPicker("feats")),
-                ("vec", DictVectorizer(sparse=False)),
-            ])),
-            ("text", Pipeline([
-                ("pick", _RowPicker("text")),
-                ("tfidf", TfidfVectorizer(
-                    ngram_range=(1, 2), max_features=MAX_TFIDF_FEATURES,
-                    sublinear_tf=True, strip_accents="unicode",
-                    stop_words="english", min_df=1,
-                )),
-            ])),
-        ])),
-        ("clf", HistGradientBoostingClassifier(
-            max_iter=200, learning_rate=0.1, max_depth=None,
-            random_state=42,
-        )),
-    ])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(clf, X, y_arr, cv=cv, scoring="f1_macro")
+    clf.fit(X, y_arr)
+    save_model({"vec": vec, "tfidf": tfidf, "clf": clf,
+                "kind": model_kind})
 
-    X = {"feats": X_feats, "text": X_text}
-    cv_scores = cross_val_score(pipe, X, np.array(y), cv=5, scoring="f1_macro")
-    pipe.fit(X, np.array(y))
-    save_model(pipe)
-
-    train_pred = pipe.predict(X)
-    train_acc = float((train_pred == np.array(y)).mean())
     return {
         "rows": len(labeled),
+        "model_kind": model_kind,
         "cv_f1_macro_mean": float(cv_scores.mean()),
         "cv_f1_macro_std": float(cv_scores.std()),
-        "train_accuracy": train_acc,
+        "train_accuracy": float(clf.score(X, y_arr)),
     }
 
 
 def classify(parsed, signals: List[Dict[str, Any]],
              iocs: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """Get ML prediction for an email."""
-    pipe = load_model()
-    if pipe is None:
+    """Second-opinion ML verdict for one email; None when no model.
+
+    Returns {probability_phishing, prediction, model} — the rule engine
+    stays the primary verdict; this is additive, never a gatekeeper.
+    """
+    import scipy.sparse as sp
+
+    bundle = load_model()
+    if bundle is None or not isinstance(bundle, dict):
         return None
+    vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
     feats = _featurize(parsed, signals, iocs)
     text = _text_for_tfidf(parsed)
-    proba = pipe.predict_proba({"feats": [feats], "text": [text]})[0]
-    idx = int(getattr(pipe, "classes_", [0, 1]).tolist().index(1)) \
-        if hasattr(pipe, "classes_") else 1
+    F = vec.transform([feats])
+    T = tfidf.transform([text])
+    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    proba = clf.predict_proba(X)[0]
+    classes = list(getattr(clf, "classes_", [0, 1]))
+    idx = classes.index(1) if 1 in classes else 1
     p_phish = float(proba[idx])
     return {
         "probability_phishing": round(p_phish, 4),
         "prediction": 1 if p_phish >= 0.5 else 0,
-        "model": "ml-gbdt",
+        "model": bundle.get("kind", "ml"),
     }
