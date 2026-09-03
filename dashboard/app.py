@@ -5,7 +5,14 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import sys
 from pathlib import Path
+
+# Make the phishingclassifier package importable regardless of where the
+# app runs from (repo root locally, /mount/src/<repo> on Streamlit Cloud).
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 import streamlit as st
 
@@ -220,20 +227,25 @@ def _render_cases(results: list) -> None:
 
 
 def _sidebar_integrations() -> None:
-    """Display threat intelligence integration status."""
+    """Display threat intelligence integration status.
+
+    Degrades gracefully: any failure (including the package being
+    unavailable) shows offline status instead of crashing the dashboard.
+    """
     st.header("Integrations")
     state_info: dict = {"mode": "offline"}
 
-    from phishingclassifier.enrich import EnrichmentState
     try:
-        state = EnrichmentState(offline=False, workdir=".")
+        from phishingclassifier.enrich import EnrichmentState
+
+        state = EnrichmentState(offline=False, workdir=str(_ROOT))
         state_info = {
             "mode": "live" if state.enabled else "offline",
             "vt": bool(state.vt_key),
             "urlscan": bool(state.urlscan_key),
         }
     except Exception:
-        pass
+        pass  # status panel only — never a crash vector
 
     if state_info.get("mode") == "live":
         st.markdown("● **live** — threat-intel lookups active")
@@ -249,7 +261,8 @@ def _sidebar_integrations() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--json", default="reports/output/results.json",
+    parser.add_argument("--json",
+                        default=str(_ROOT / "reports" / "output" / "results.json"),
                         help="batch results JSON from the phishingclassifier CLI")
     args, _ = parser.parse_known_args()
 
@@ -280,7 +293,7 @@ def main() -> None:
             "display-name spoof, credential harvester, and legitimate notification.</div>",
             unsafe_allow_html=True,
         )
-        fixtures = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+        fixtures = _ROOT / "tests" / "fixtures"
         for name in DEMO_EMAILS:
             path = fixtures / name
             if not path.is_file():

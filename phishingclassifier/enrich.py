@@ -36,9 +36,15 @@ class EnrichmentState:
             self._load_cache()
 
     def _load_keys(self) -> None:
-        # load from .env file if present
-        env_path = Path(".env")
-        if env_path.is_file():
+        # .env from the repo root (works regardless of process cwd), with a
+        # cwd fallback so running from anywhere still finds a local .env.
+        candidates = [
+            Path(__file__).resolve().parent.parent / ".env",
+            Path(".env"),
+        ]
+        for env_path in candidates:
+            if not env_path.is_file():
+                continue
             try:
                 for line in env_path.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
@@ -52,6 +58,7 @@ class EnrichmentState:
                         self.urlscan_key = value
             except OSError:
                 pass
+            break  # first existing .env wins; never stack multiple files
 
         # environment variables take precedence
         env_vt = os.environ.get("VT_API_KEY", "").strip()

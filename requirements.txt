@@ -1,1 +1,10 @@
+# Runtime requirements (Streamlit Cloud installs from this file).
+# Core tool is stdlib-first; these are the third-party pieces:
+# - streamlit: dashboard
+# - scikit-learn + joblib: ML classifier (train/classify)
+# - requests: live threat-intel enrichment (optional at runtime,
+#   gracefully skipped when absent)
+streamlit==1.63.0
+scikit-learn==1.9.0
+joblib==1.6.0
 requests==2.32.5
