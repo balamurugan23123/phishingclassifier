@@ -64,6 +64,7 @@ CSS = """
  font-variant-numeric:tabular-nums}
 .pc-meta b{color:#e6ebee;font-weight:700}
 .pc-meta .bad{color:#f87171}
+.pc-meta .warn{color:#fbbf24}
 .pc-lead-sm{font-size:11px;font-weight:700;letter-spacing:.14em;
  color:#8fa1ad;text-transform:uppercase;margin:10px 0 4px 0}
 .pc-dropzone{border:1px dashed rgba(230,235,238,.22);border-radius:6px;
@@ -170,6 +171,16 @@ def _render_cases(results: list) -> None:
         subject = (r.get("subject") or "(no subject)")[:96]
         from_line = (f"{_esc(r.get('from_display', ''))} "
                      f"&lt;{_esc(r.get('from', ''))}&gt;")
+        # ML second opinion: rendered only when a trained model exists.
+        # pct >= 60 red-flagged, >= 30 amber, below stays neutral.
+        ml = r.get("ml")
+        if ml:
+            pct = ml.get("probability_phishing", 0) * 100
+            cls = "bad" if pct >= 60 else ("warn" if pct >= 30 else "")
+            ml_html = (f"<span class='{cls}'>ML <b>{pct:.0f}%</b> "
+                       f"phishing</span>")
+        else:
+            ml_html = ""
         head_html = f"""
 <div class="pc-case">
  <div class="pc-case-inner">
@@ -189,6 +200,7 @@ def _render_cases(results: list) -> None:
    {f"<span>Origin <b>{_esc(r['origin_ip'])}</b></span>" if r.get("origin_ip") else ""}
    <span>{auth_html}</span>
    <span>Hops <b>{r.get('received_hops', 0)}</b></span>
+   {ml_html}
   </div>
 """
         st.markdown(head_html, unsafe_allow_html=True)
@@ -226,6 +238,28 @@ def _render_cases(results: list) -> None:
         st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _bridge_cloud_secrets() -> None:
+    """Streamlit Cloud secrets -> os.environ bridge.
+
+    Cloud injects secrets via st.secrets (TOML), but the enrichment layer
+    reads env vars / .env. Bridge them once per process so live lookups
+    work on Cloud exactly as they do locally with .env. Never bridges
+    anything that already exists in the environment (real env wins).
+    """
+    import os
+
+    try:
+        if not hasattr(st, "secrets"):
+            return
+        for name in ("VT_API_KEY", "URLSCAN_API_KEY"):
+            if not os.environ.get(name):
+                value = st.secrets.get(name)
+                if value:
+                    os.environ[name] = str(value)
+    except Exception:
+        pass  # secrets unavailable (local run) — nothing to bridge
+
+
 def _sidebar_integrations() -> None:
     """Display threat intelligence integration status.
 
@@ -235,6 +269,7 @@ def _sidebar_integrations() -> None:
     st.header("Integrations")
     state_info: dict = {"mode": "offline"}
 
+    _bridge_cloud_secrets()
     try:
         from phishingclassifier.enrich import EnrichmentState
 
@@ -254,8 +289,8 @@ def _sidebar_integrations() -> None:
     else:
         st.markdown("○ **offline** — no API keys configured")
         st.caption(
-            "Live enrichment runs when keys are present in `.env` "
-            "(see `.env.example`)."
+            "Keys come from .env locally, or the app's Secrets "
+            "(VT_API_KEY / URLSCAN_API_KEY) on Streamlit Cloud."
         )
 
 

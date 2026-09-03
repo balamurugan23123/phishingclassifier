@@ -23,8 +23,11 @@ samples/*.csv
 # Generated reports
 reports/output/
 
-# Trained models
-models/
+# Trained models — the production model ships with the repo (0.8MB,
+# trained on public Kaggle data); retrain artifacts overwrite it
+models/*
+!models/phish_model.joblib
+!models/README.md
 
 # Streamlit
 .streamlit/secrets.toml
