@@ -1,0 +1,8 @@
+# Windows line-ending hygiene
+* text=auto
+
+# Shell-ish files always LF
+*.sh text eol=lf
+
+# Binary fixtures stay binary
+*.eml -text

@@ -1,0 +1,41 @@
+Return-Path: <bounce-abc123@mail.paypa1-secure-alerts.com>
+Delivered-To: victim@example.net
+Received: from mail.paypa1-secure-alerts.com ([198.51.100.77])
+	by mx.example.net with SMTP id xyz789
+	Wed, 02 Sep 2026 09:00:00 +0000
+From: "PayPal Support" <security@paypa1-secure-alerts.com>
+To: victim@example.net
+Subject: URGENT: Your account has been suspended - verify now
+Reply-To: verify.acct.2026@mail.paypa1-secure-alerts.com
+Date: Wed, 02 Sep 2026 08:58:11 +0000
+Message-ID: <MIME42@paypa1-secure-alerts>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="BOUNDARY_SPOOF"
+
+--BOUNDARY_SPOOF
+Content-Type: text/plain; charset=utf-8
+
+Dear Customer,
+
+We detected unusual activity on your account. Your account has been
+suspended. To restore access, verify your account within 24 hours by
+clicking the link below:
+
+http://paypa1-secure-alerts.com/verify?id=a1b2c3
+
+Failure to verify will result in permanent account closure.
+
+Sincerely,
+PayPal Security Team
+--BOUNDARY_SPOOF
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Dear Customer,</p>
+<p>We detected <b>unusual activity</b> on your account. Your account has been
+suspended. To restore access, verify your account within 24 hours:</p>
+<p><a href="http://paypa1-secure-alerts.com/verify?id=a1b2c3">http://www.paypal.com/verify</a></p>
+<p>Failure to verify will result in permanent account closure.</p>
+<p>Sincerely,<br>PayPal Security Team</p>
+</body></html>
+--BOUNDARY_SPOOF--

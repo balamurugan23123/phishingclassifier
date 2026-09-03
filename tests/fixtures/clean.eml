@@ -1,0 +1,25 @@
+Return-Path: <noreply@github.com>
+Delivered-To: analyst@example.com
+Received: from github.com ([140.82.112.3])
+	by mail.example.com with ESMTPS id abc123
+	Wed, 02 Sep 2026 08:15:00 +0000
+Authentication-Results: mail.example.com; spf=pass (sender of www.github.com is authorized) dkim=pass (2048-bit key) header.d=github.com; dmarc=pass (p=none) header.from=github.com
+From: "GitHub" <noreply@github.com>
+To: analyst@example.com
+Subject: [example/example] New release published (#v2.1.0)
+Date: Wed, 02 Sep 2026 08:14:52 +0000
+Message-ID: <release-1725266092@github.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi @analyst,
+
+A new release was published for example/example: v2.1.0.
+
+You can review the changelog in the repository at your convenience.
+
+Thanks,
+The GitHub team
+
+--
+You are receiving this because you were subscribed to this release feed.

