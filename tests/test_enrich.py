@@ -17,7 +17,11 @@ def test_offline_mode_when_no_keys(tmp_path, monkeypatch):
     monkeypatch.delenv("VT_API_KEY", raising=False)
     monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
-    state = EnrichmentState(offline=False)
+    # Plant an empty .env in the workdir: the loader takes the first
+    # EXISTING .env it finds, so this isolates the test from the real
+    # repo-root .env (which holds live keys on dev machines).
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    state = EnrichmentState(offline=False, workdir=str(tmp_path))
     assert state.enabled is False
     parsed = parse_eml(str(FIXTURES / "harvester.eml"))
     result = build_result(parsed, analyze_signals(parsed))

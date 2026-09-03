@@ -31,14 +31,17 @@ class EnrichmentState:
         self._last_vt_request = 0.0
         self.requests_made = 0
         self.errors: List[str] = []
-        self._load_keys()
+        self._load_keys(workdir)
         if self.vt_key or self.urlscan_key:
             self._load_cache()
 
-    def _load_keys(self) -> None:
-        # .env from the repo root (works regardless of process cwd), with a
-        # cwd fallback so running from anywhere still finds a local .env.
+    def _load_keys(self, workdir: str = ".") -> None:
+        # .env lookup order: explicit workdir (tests pass tmp_path to
+        # isolate), then repo root (so the CLI/dashboard find keys no
+        # matter the cwd), then process cwd. First existing file wins;
+        # real environment variables always take precedence.
         candidates = [
+            Path(workdir) / ".env",
             Path(__file__).resolve().parent.parent / ".env",
             Path(".env"),
         ]
