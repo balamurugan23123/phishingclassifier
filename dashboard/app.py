@@ -35,10 +35,6 @@ CSS = """
 <style>
 .pc-lead{font-size:15px;font-weight:700;letter-spacing:.14em;
  color:#8fa1ad;text-transform:uppercase;margin:0 0 4px 0}
-.pc-hero{font-size:44px;line-height:1.05;font-weight:800;color:#e6ebee;
- font-variant-numeric:tabular-nums}
-.pc-sub{font-size:13px;font-weight:600;color:#8fa1ad;margin-top:6px;
- font-variant-numeric:tabular-nums}
 .pc-distro-bar{display:flex;height:52px;margin:10px 0 4px 0;border-radius:4px;
  overflow:hidden;border:1px solid rgba(230,235,238,.14)}
 .pc-distro-seg{display:flex;align-items:center;padding:0 10px;
@@ -296,23 +292,21 @@ def _sidebar_integrations() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--json",
-                        default=str(_ROOT / "reports" / "output" / "results.json"),
-                        help="batch results JSON from the phishingclassifier CLI")
+    parser.add_argument(
+        "--json",
+        default=str(_ROOT / "samples" / "demo_batch" / "results.json"),
+        help="batch results JSON from the phishingclassifier CLI",
+    )
     args, _ = parser.parse_known_args()
 
     st.markdown(CSS, unsafe_allow_html=True)
 
-    left, right = st.columns([5, 2])
-    with left:
-        st.markdown(
-            "<p class='pc-lead'>Phishing Classifier — triage bench</p>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Heuristic scores are analyst aids, not verdicts.")
-    with right:
-        st.markdown("<p class='pc-lead' style='text-align:right'>bench</p>",
-                    unsafe_allow_html=True)
+    st.markdown(
+        "<p class='pc-lead'>Phishing Classifier — triage bench</p>",
+        unsafe_allow_html=True,
+    )
+    st.caption("Heuristic scores are analyst aids, not verdicts. "
+               "IOC URLs render as plain text; never click or scan them.")
 
     mode = st.radio(
         "Input",
@@ -386,15 +380,21 @@ def main() -> None:
         try:
             results = _load_results(args.json)
         except FileNotFoundError:
-            st.error(f"Results file not found: {args.json}\n\n"
-                     "Generate one first, e.g.:\n\n"
-                     "```\n"
-                     "python -m phishingclassifier.cli analyze <folder> "
-                     "--json reports/output/results.json\n"
-                     "```")
+            st.info(
+                "No batch results file at "
+                f"`{_esc(Path(args.json).name)}`.\n\n"
+                "This tab reads the JSON produced by the CLI "
+                "(`analyze ... --json`). The committed demo file ships at "
+                "`samples/demo_batch/results.json`; point `--json` at it "
+                "or your own analysis output."
+            )
+            with st.sidebar:
+                _sidebar_integrations()
             return
         except json.JSONDecodeError:
             st.error("Results file is not valid JSON.")
+            with st.sidebar:
+                _sidebar_integrations()
             return
         with st.sidebar:
             st.header("Batch filters")

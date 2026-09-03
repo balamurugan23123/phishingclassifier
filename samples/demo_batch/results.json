@@ -1,0 +1,376 @@
+{
+  "tool": "phishingclassifier",
+  "version": "0.6.0",
+  "count": 3,
+  "results": [
+    {
+      "file": "tests\\fixtures\\harvester.eml",
+      "subject": "Invoice INV-2026-0842 attached - payment due",
+      "from": "invoices@euro-tax-portal.biz",
+      "from_display": "EU Tax Portal",
+      "from_domain": "euro-tax-portal.biz",
+      "reply_to": "",
+      "return_path": "invoices@euro-tax-portal.biz",
+      "origin_ip": "203.0.113.42",
+      "received_hops": 1,
+      "auth": {
+        "spf": "fail",
+        "dkim": "none",
+        "dmarc": "fail"
+      },
+      "parser_warnings": [],
+      "iocs": {
+        "ipv4": {
+          "origin": "203.0.113.42",
+          "header": [
+            "203.0.113.42"
+          ],
+          "body": [
+            "203.0.113.42"
+          ]
+        },
+        "domains": {
+          "header": [
+            "euro-tax-portal.biz",
+            "examplecorp.com",
+            "vps99.euro-tax-portal.biz",
+            "mailgate.examplecorp.com"
+          ],
+          "body": []
+        },
+        "urls": {
+          "header": [],
+          "body": [
+            "http://203.0.113.42:8080/invoice/view",
+            "http://203.0.113.42:8080/login"
+          ]
+        },
+        "emails": {
+          "header": [
+            "accounting@examplecorp.com",
+            "invoices@euro-tax-portal.biz"
+          ],
+          "body": []
+        },
+        "attachment_hashes": [
+          {
+            "sha256": "b9f0f25e585edacb721a495a6e2310f2e8c7e10bfad87bbb82b34560f4d0bcdc",
+            "filename": "INV-2026-0842.zip"
+          }
+        ]
+      },
+      "signals": [
+        {
+          "id": "spf_fail",
+          "weight": 20,
+          "reason": "SPF fail: sending server is not authorized for the sender domain",
+          "evidence": "Authentication-Results: spf=fail"
+        },
+        {
+          "id": "dmarc_fail",
+          "weight": 20,
+          "reason": "DMARC fail: sending server is not authorized for the sender domain",
+          "evidence": "Authentication-Results: dmarc=fail"
+        },
+        {
+          "id": "message_id_absent",
+          "weight": 5,
+          "reason": "Message-ID is missing or malformed",
+          "evidence": "Message-ID: <>"
+        },
+        {
+          "id": "url_ip_literal",
+          "weight": 20,
+          "reason": "URL uses a raw IP address: http://203.0.113.42:8080/invoice/view",
+          "evidence": "http://203.0.113.42:8080/invoice/view"
+        },
+        {
+          "id": "url_nonstandard_port",
+          "weight": 10,
+          "reason": "URL uses non-standard port 8080: http://203.0.113.42:8080/invoice/view",
+          "evidence": "http://203.0.113.42:8080/invoice/view"
+        },
+        {
+          "id": "url_ip_literal",
+          "weight": 20,
+          "reason": "URL uses a raw IP address: http://203.0.113.42:8080/login",
+          "evidence": "http://203.0.113.42:8080/login"
+        },
+        {
+          "id": "url_nonstandard_port",
+          "weight": 10,
+          "reason": "URL uses non-standard port 8080: http://203.0.113.42:8080/login",
+          "evidence": "http://203.0.113.42:8080/login"
+        },
+        {
+          "id": "generic_greeting",
+          "weight": 5,
+          "reason": "Generic greeting 'dear sir/madam' detected",
+          "evidence": "dear sir/madam"
+        },
+        {
+          "id": "credential_form",
+          "weight": 20,
+          "reason": "HTML contains a form with a password field",
+          "evidence": "<form action=http://203.0.113.42:8080/login> with password input"
+        },
+        {
+          "id": "lure_signal_correlation",
+          "weight": 15,
+          "reason": "7 distinct signals fired together",
+          "evidence": "signals: credential_form, dmarc_fail, generic_greeting, message_id_absent, spf_fail, url_ip_literal"
+        }
+      ],
+      "score": {
+        "score": 100,
+        "raw_weight_total": 145,
+        "capped": true,
+        "verdict": "Malicious",
+        "signal_count": 10,
+        "top_signals": [
+          {
+            "id": "spf_fail",
+            "weight": 20,
+            "reason": "SPF fail: sending server is not authorized for the sender domain"
+          },
+          {
+            "id": "dmarc_fail",
+            "weight": 20,
+            "reason": "DMARC fail: sending server is not authorized for the sender domain"
+          },
+          {
+            "id": "url_ip_literal",
+            "weight": 20,
+            "reason": "URL uses a raw IP address: http://203.0.113.42:8080/invoice/view"
+          }
+        ]
+      },
+      "ml": {
+        "probability_phishing": 0.3051,
+        "prediction": 0,
+        "model": "ml-gbdt"
+      },
+      "enrichment": {
+        "mode": "offline (--offline flag)",
+        "lookups": [],
+        "errors": []
+      }
+    },
+    {
+      "file": "tests\\fixtures\\spoofed.eml",
+      "subject": "URGENT: Your account has been suspended - verify now",
+      "from": "security@paypa1-secure-alerts.com",
+      "from_display": "PayPal Support",
+      "from_domain": "paypa1-secure-alerts.com",
+      "reply_to": "verify.acct.2026@mail.paypa1-secure-alerts.com",
+      "return_path": "bounce-abc123@mail.paypa1-secure-alerts.com",
+      "origin_ip": "198.51.100.77",
+      "received_hops": 1,
+      "auth": {
+        "spf": "",
+        "dkim": "",
+        "dmarc": ""
+      },
+      "parser_warnings": [],
+      "iocs": {
+        "ipv4": {
+          "origin": "198.51.100.77",
+          "header": [
+            "198.51.100.77"
+          ],
+          "body": []
+        },
+        "domains": {
+          "header": [
+            "mail.paypa1-secure-alerts.com",
+            "mx.example.net",
+            "paypa1-secure-alerts.com"
+          ],
+          "body": [
+            "paypa1-secure-alerts.com",
+            "www.paypal.com"
+          ]
+        },
+        "urls": {
+          "header": [],
+          "body": [
+            "http://paypa1-secure-alerts.com/verify?id=a1b2c3",
+            "http://paypa1-secure-alerts.com/verify?id=a1b2c3",
+            "http://www.paypal.com/verify"
+          ]
+        },
+        "emails": {
+          "header": [
+            "bounce-abc123@mail.paypa1-secure-alerts.com",
+            "security@paypa1-secure-alerts.com",
+            "verify.acct.2026@mail.paypa1-secure-alerts.com",
+            "victim@example.net"
+          ],
+          "body": []
+        },
+        "attachment_hashes": []
+      },
+      "signals": [
+        {
+          "id": "auth_header_absent",
+          "weight": 5,
+          "reason": "No Authentication-Results header: SPF/DKIM/DMARC could not be verified",
+          "evidence": "(header absent)"
+        },
+        {
+          "id": "return_path_mismatch",
+          "weight": 20,
+          "reason": "Return-Path domain (mail.paypa1-secure-alerts.com) differs from From domain (paypa1-secure-alerts.com)",
+          "evidence": "Return-Path: bounce-abc123@mail.paypa1-secure-alerts.com vs From: security@paypa1-secure-alerts.com"
+        },
+        {
+          "id": "reply_to_mismatch",
+          "weight": 10,
+          "reason": "Reply-To domain (mail.paypa1-secure-alerts.com) differs from From domain (paypa1-secure-alerts.com)",
+          "evidence": "Reply-To: verify.acct.2026@mail.paypa1-secure-alerts.com vs From: security@paypa1-secure-alerts.com"
+        },
+        {
+          "id": "display_name_spoof",
+          "weight": 20,
+          "reason": "Display name mentions 'paypal' but domain 'paypa1-secure-alerts.com' is not official",
+          "evidence": "From: PayPal Support <security@paypa1-secure-alerts.com>"
+        },
+        {
+          "id": "lookalike_domain",
+          "weight": 20,
+          "reason": "Host resembles a brand domain: http://paypa1-secure-alerts.com/verify?id=a1b2c3 (matched 'paypa1')",
+          "evidence": "http://paypa1-secure-alerts.com/verify?id=a1b2c3"
+        },
+        {
+          "id": "brand_lookalike_fuzzy",
+          "weight": 20,
+          "reason": "Host is a near-match of brand 'paypal': http://www.paypal.com/verify",
+          "evidence": "http://www.paypal.com/verify"
+        },
+        {
+          "id": "link_text_mismatch",
+          "weight": 20,
+          "reason": "Link text shows 'www.paypal.com' but href goes to 'paypa1-secure-alerts.com'",
+          "evidence": "text='http://www.paypal.com/verify' href='http://paypa1-secure-alerts.com/verify?id=a1b2c3'"
+        },
+        {
+          "id": "generic_greeting",
+          "weight": 5,
+          "reason": "Generic greeting 'dear customer' detected",
+          "evidence": "dear customer"
+        },
+        {
+          "id": "urgency_keywords",
+          "weight": 15,
+          "reason": "Urgency phrases detected (6 phrase(s))",
+          "evidence": "verify your account, account has been suspended, suspended, unusual activity, urgent"
+        },
+        {
+          "id": "lure_signal_correlation",
+          "weight": 15,
+          "reason": "9 distinct signals fired together",
+          "evidence": "signals: auth_header_absent, brand_lookalike_fuzzy, display_name_spoof, generic_greeting, link_text_mismatch, lookalike_domain"
+        }
+      ],
+      "score": {
+        "score": 100,
+        "raw_weight_total": 150,
+        "capped": true,
+        "verdict": "Malicious",
+        "signal_count": 10,
+        "top_signals": [
+          {
+            "id": "return_path_mismatch",
+            "weight": 20,
+            "reason": "Return-Path domain (mail.paypa1-secure-alerts.com) differs from From domain (paypa1-secure-alerts.com)"
+          },
+          {
+            "id": "display_name_spoof",
+            "weight": 20,
+            "reason": "Display name mentions 'paypal' but domain 'paypa1-secure-alerts.com' is not official"
+          },
+          {
+            "id": "lookalike_domain",
+            "weight": 20,
+            "reason": "Host resembles a brand domain: http://paypa1-secure-alerts.com/verify?id=a1b2c3 (matched 'paypa1')"
+          }
+        ]
+      },
+      "ml": {
+        "probability_phishing": 0.3397,
+        "prediction": 0,
+        "model": "ml-gbdt"
+      },
+      "enrichment": {
+        "mode": "offline (--offline flag)",
+        "lookups": [],
+        "errors": []
+      }
+    },
+    {
+      "file": "tests\\fixtures\\clean.eml",
+      "subject": "[example/example] New release published (#v2.1.0)",
+      "from": "noreply@github.com",
+      "from_display": "GitHub",
+      "from_domain": "github.com",
+      "reply_to": "",
+      "return_path": "noreply@github.com",
+      "origin_ip": "140.82.112.3",
+      "received_hops": 1,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass"
+      },
+      "parser_warnings": [],
+      "iocs": {
+        "ipv4": {
+          "origin": "140.82.112.3",
+          "header": [
+            "140.82.112.3"
+          ],
+          "body": []
+        },
+        "domains": {
+          "header": [
+            "github.com",
+            "www.github.com"
+          ],
+          "body": []
+        },
+        "urls": {
+          "header": [],
+          "body": []
+        },
+        "emails": {
+          "header": [
+            "analyst@example.com",
+            "noreply@github.com",
+            "release-1725266092@github.com"
+          ],
+          "body": []
+        },
+        "attachment_hashes": []
+      },
+      "signals": [],
+      "score": {
+        "score": 0,
+        "raw_weight_total": 0,
+        "capped": false,
+        "verdict": "Clean",
+        "signal_count": 0,
+        "top_signals": []
+      },
+      "ml": {
+        "probability_phishing": 0.0719,
+        "prediction": 0,
+        "model": "ml-gbdt"
+      },
+      "enrichment": {
+        "mode": "offline (--offline flag)",
+        "lookups": [],
+        "errors": []
+      }
+    }
+  ]
+}
