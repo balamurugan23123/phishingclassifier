@@ -1,0 +1,33 @@
+# --- phishing classifier ---
+
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Threat-intel cache
+cache/
+
+# Real corpus data
+data/corpus/
+
+# Generated reports
+reports/output/
+
+# Trained models
+models/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
