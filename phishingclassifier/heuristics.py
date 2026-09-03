@@ -81,7 +81,7 @@ INSTITUTION_KEYWORDS = [
     "bank", "security", "support", "admin", "billing", "finance",
     "financial officer", "accounts", "treasury", "federal", "government",
     "ministry", "embassy", "courier", "lottery", "director", "official",
-    "office", "authority", "department", "agency", "remittance",
+    "office", "authority", "department", "agency", "remittance", "officer",
 ]
 
 # Amount + release/pending pattern: the universal advance-fee shape.
@@ -98,6 +98,52 @@ RELEASE_LANGUAGE = [
     "your money", "transfer fee", "activation charg", "registration charg",
     "processing fee", "delivery fee", "compensation", "atm card",
     "tracking number", "pick up the money", "daily transfer",
+]
+
+# Irreversible-payment requests — the universal scam tell. Direction
+# matters: ASKING to be paid in gift cards/crypto/wire, never giving
+# them as a gift ("get you an apple gift card" is a present, not a scam).
+IRREVERSIBLE_PAYMENT_RE = re.compile(
+    r"\b(?:send|pay|load|transfer|purchase)\s+(?:us\s+|the\s+|me\s+|an?\s+|your\s+)?"
+    r"(?:\$\s?\d[\d,.]*\s*(?:worth\s+of\s+)?\s*)?"
+    r"(?:apple|itunes|google\s?play|steam|amazon|walmart|target)?\s*"
+    r"gift\s?cards?\b"
+    r"|\bgift\s?card\s+(?:codes?|numbers?|pins?)\s+(?:to|at)\b"
+    r"|\bvia\s+(?:apple|google\s?play|steam|amazon|itunes|walmart)\s+gift"
+    r"|\b(?:bitcoin|btc|eth|usdt)\s+(?:wallet|address)\b"
+    r"|\bsend\s+(?:the\s+)?(?:funds?|payment|money)\s+(?:via|through|in)\b"
+    r"|\bwire\s+(?:the\s+)?(?:funds?|money)\s+(?:to|via)\b"
+    r"|\bpay\s+(?:the\s+)?(?:fee|charges?)\s+(?:via|in|with)\b",
+    re.IGNORECASE,
+)
+
+# Windfall claims: you-won language + claim instructions. Both required —
+# congratulations alone appears in legitimate mail constantly. The claim
+# instruction list is deliberately scam-flavored ("claims agent",
+# "promotions program"); generic "to claim your X" alone is too weak since
+# internal mail legitimately says "to claim your parking spot".
+WINNINGS_RE = re.compile(
+    r"\b(?:your\s+email|email\s+address|your\s+name)\s+"
+    r"(?:have\s+|has\s+)?(?:won|selected|drawn|chosen)\b"
+    r"|\b(?:winner|winnings|lucky\s+(?:draw|winner))\b",
+    re.IGNORECASE,
+)
+CLAIM_INSTRUCTIONS = [
+    "claims must", "claims agent", "promotions program",
+    "promotion program", "final winner", "contact the claims",
+    "send your name", "fill the form", "claim form",
+    "keep this confidential", "unclaimed funds",
+]
+
+# Credential-lure phrasing (mailbox-reconfirmation family). Deliberately
+# excludes legit password-reset wording ("reset your password", "set a
+# new password", "choose a password") — those are legitimate flows.
+CREDENTIAL_LURE = [
+    "re-confirm", "reconfirm", "re-enter", "re-activate your mailbox",
+    "validate your mailbox", "confirm your mailbox", "mailbox credentials",
+    "email password to", "confirm your email password",
+    "avoid service interruption", "mailbox will be closed",
+    "account deactivation", "validate your account", "renew your mailbox",
 ]
 
 MONEY_SCAM_KEYWORDS = [
@@ -439,11 +485,25 @@ def _check_free_webmail_impersonation(parsed: ParsedEmail,
         ))
     # Brand mention anywhere while sending from free webmail: the MoneyGram
     # scam class — brand impersonated in body, sender on gmail/yahoo.
+    # FP guards: a brand used as PAYMENT METHOD ("Apple gift cards") or as
+    # the product itself ("your Amazon order shipped... from gmail") is
+    # not an identity claim. Scrub payment contexts, and require the brand
+    # to appear at least once OUTSIDE a gift-card/payment phrase.
+    brand_zone = IRREVERSIBLE_PAYMENT_RE.sub(" ", haystack)
+    # also neutralize 'X gift card' product mentions in any direction
+    brand_zone = re.sub(
+        r"\b(?:apple|itunes|google\s?play|steam|amazon|walmart|target)\s+"
+        r"gift\s?cards?\b|\bgift\s?cards?\s+(?:from|for)\s+"
+        r"(?:apple|amazon|walmart|target|steam)\b",
+        " ", brand_zone, flags=re.IGNORECASE,
+    )
+    brand_zone = brand_zone.replace(" gift card", " ").replace(
+        " gift cards", " ")
     for brand in BRANDS:
         if brand == "outlook" or brand in ("google", "icloud"):
             continue  # brands owned BY webmail providers
         norm_brand = normalize_confusables(brand)
-        if re.search(rf"\b{re.escape(norm_brand)}\b", haystack):
+        if re.search(rf"\b{re.escape(norm_brand)}\b", brand_zone):
             legit_domains = BRANDS[brand]
             if parsed.from_domain not in legit_domains:
                 signals.append(_signal(
@@ -486,6 +546,50 @@ def _check_money_scam(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> Non
             "money_scam_language", weight,
             f"Advance-fee scam language detected ({len(fired)} phrase(s))",
             ", ".join(fired[:5]),
+        ))
+
+
+def _check_irreversible_payment(parsed: ParsedEmail,
+                                signals: List[Dict[str, Any]]) -> None:
+    """Requests to pay via gift cards / crypto / wire — the universal scam
+    tell. No legitimate business ever asks for gift cards."""
+    text = _haystack(parsed)
+    hits = IRREVERSIBLE_PAYMENT_RE.findall(text)
+    if hits:
+        signals.append(_signal(
+            "irreversible_payment_request", W_HIGH,
+            f"Payment requested via irreversible method ({len(hits)}x): "
+            "gift cards / crypto / wire — no legitimate business does this",
+            "; ".join(h[:50] for h in hits[:3]),
+        ))
+
+
+def _check_windfall(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """You-won claims paired with claim instructions. Both required."""
+    text = _haystack(parsed)
+    win = WINNINGS_RE.search(text)
+    claim = [c for c in CLAIM_INSTRUCTIONS if c in text]
+    if win and claim:
+        signals.append(_signal(
+            "windfall_claim", W_HIGH,
+            "Windfall/win claim paired with claim instructions — "
+            "lottery/advance-fee structure",
+            f"win: '{win.group(0)}'; instructions: {', '.join(claim[:3])}",
+        ))
+
+
+def _check_credential_lure(parsed: ParsedEmail,
+                           signals: List[Dict[str, Any]]) -> None:
+    """Mailbox/credential 're-confirmation' phrasing. Legitimate flows say
+    'reset your password' — lures say 're-confirm your credentials'."""
+    text = _haystack(parsed)
+    fired = [c for c in CREDENTIAL_LURE if c in text]
+    if fired:
+        signals.append(_signal(
+            "credential_lure_language", W_MEDHIGH,
+            f"Credential re-confirmation lure ({len(fired)} phrase(s)) — "
+            "phrasing legitimate password-reset mail never uses",
+            ", ".join(fired[:4]),
         ))
 
 
@@ -576,6 +680,9 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
     _check_domain_entropy(parsed, iocs, signals)
     _check_free_webmail_impersonation(parsed, signals)
     _check_money_scam(parsed, signals)
+    _check_irreversible_payment(parsed, signals)
+    _check_windfall(parsed, signals)
+    _check_credential_lure(parsed, signals)
     _check_spam_sales(parsed, signals)
     _check_generic_greeting(parsed, signals)
     _check_link_count(parsed, iocs, signals)

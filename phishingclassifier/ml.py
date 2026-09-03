@@ -25,6 +25,9 @@ KNOWN_SIGNAL_IDS = [
     "free_webmail_impersonation", "generic_greeting", "link_count_high",
     "base64_blob", "lure_signal_correlation", "brand_lookalike_fuzzy",
     "vt_malicious_verdict", "urlscan_malicious_verdict",
+    "webmail_brand_impersonation", "reply_to_identity_divergence",
+    "advance_fee_structure", "irreversible_payment_request",
+    "windfall_claim", "credential_lure_language",
 ]
 
 _MODEL_CACHE: Dict[str, Any] = {}
