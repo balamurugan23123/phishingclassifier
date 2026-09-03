@@ -246,7 +246,10 @@ def _check_urls(parsed: ParsedEmail, iocs: Dict[str, Any], signals: List[Dict[st
                 f"URL uses a shortener service: {url}",
                 url,
             ))
-        port = urlparse(url).port
+        try:
+            port = urlparse(url).port
+        except ValueError:
+            port = None  # malformed port in corpus URL (e.g. ':80,') — skip
         if port is not None and port not in (80, 443):
             signals.append(_signal(
                 "url_nonstandard_port", W_MED,

@@ -47,7 +47,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     train = sub.add_parser(
         "train", help="Train the ML classifier on a labeled CSV dataset")
-    train.add_argument("csv_path", help="Labeled CSV (sender,subject,body,label)")
+    train.add_argument("csv_path",
+                       help="Labeled CSV file, or a directory of CSVs")
+    train.add_argument("--per-class", type=int, default=0,
+                      help="Balanced sample size per class (0 = all rows)")
     train.add_argument("--json", dest="json_out", metavar="PATH",
                        help="Write training metrics JSON to this path")
 
@@ -286,19 +289,32 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_train(args: argparse.Namespace) -> int:
-    """Train the ML classifier on a labeled CSV dataset."""
+    """Train the ML classifier on a labeled CSV or a directory of CSVs."""
     import json as json_mod
+    import time as time_mod
 
-    from .csv_adapter import load_csv_dataset
+    from .csv_adapter import load_combined_dataset, load_csv_dataset
     from .ml import model_path, train_from_rows
 
-    dataset = load_csv_dataset(args.csv_path)
-    labeled = [d for d in dataset if d["label"] is not None]
-    print(f"Rows loaded: {len(dataset)} "
-          f"({len(dataset) - len(labeled)} skipped: no label)")
+    target = Path(args.csv_path)
+    t0 = time_mod.monotonic()
+    if target.is_dir():
+        labeled = load_combined_dataset(str(target),
+                                        per_class=args.per_class)
+        print(f"Combined corpus: {len(labeled)} rows "
+              f"({time_mod.monotonic() - t0:.0f}s load+dedupe)")
+    else:
+        dataset = load_csv_dataset(str(target))
+        labeled = [d for d in dataset if d["label"] is not None]
+        print(f"Rows loaded: {len(dataset)} "
+              f"({len(dataset) - len(labeled)} skipped: no label)")
     if not labeled:
         print("No labeled rows found.", file=sys.stderr)
         return 2
+
+    balance = (sum(1 for r in labeled if r["label"] == 1),
+               sum(1 for r in labeled if r["label"] == 0))
+    print(f"Class balance: {balance[0]} phish / {balance[1]} legit")
 
     try:
         metrics = train_from_rows(labeled)
@@ -306,10 +322,12 @@ def cmd_train(args: argparse.Namespace) -> int:
         print(f"Cannot train: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Trained classifier on {metrics['rows']} rows")
+    print(f"Trained {metrics.get('model_kind', 'model')} on "
+          f"{metrics['rows']} rows")
     print(f"5-fold CV F1 (macro): {metrics['cv_f1_macro_mean']:.3f} "
           f"(+/- {metrics['cv_f1_macro_std']:.3f})")
     print(f"Train accuracy:       {metrics['train_accuracy']:.3f}")
+    print(f"Total time: {time_mod.monotonic() - t0:.0f}s")
     print(f"Model saved: {model_path()}")
 
     if args.json_out:
