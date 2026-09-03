@@ -36,6 +36,12 @@ BRANDS = {
     "fedex": ["fedex.com"],
     "ups": ["ups.com"],
     "usps": ["usps.com"],
+    # classic advance-fee impersonation targets (real MoneyGram scam class)
+    "moneygram": ["moneygram.com"],
+    "western union": ["westernunion.com"],
+    "westernunion": ["westernunion.com"],
+    "irs": ["irs.gov"],
+    "bank of america": ["bankofamerica.com"],
 }
 
 # known lookalike domains
@@ -73,8 +79,25 @@ FREE_WEBMAIL_DOMAINS = {
 
 INSTITUTION_KEYWORDS = [
     "bank", "security", "support", "admin", "billing", "finance",
-    "accounts", "treasury", "federal", "government", "ministry",
-    "embassy", "courier", "lottery", "director", "official",
+    "financial officer", "accounts", "treasury", "federal", "government",
+    "ministry", "embassy", "courier", "lottery", "director", "official",
+    "office", "authority", "department", "agency", "remittance",
+]
+
+# Amount + release/pending pattern: the universal advance-fee shape.
+# Catches "($3.7 million CANADA DOLLARS)", "$5,000 DAILY TRANSFER",
+# "sum of money", etc. regardless of currency or exact wording.
+MONEY_AMOUNT_RE = re.compile(
+    r"(?:\$|usd|eur|gbp|cad)\s?\d[\d,.]*\s*(?:million|billion|thousand|m|k|b)?"
+    r"|\d[\d,.]*\s(?:million|billion)\s+[a-z ]*dollars?"
+    r"|\d[\d,.]*\s(?:million|billion)\s+[a-z ]*(?:dollars|euros|pounds)",
+    re.IGNORECASE,
+)
+RELEASE_LANGUAGE = [
+    "release your", "pending file", "unclaimed", "claim your",
+    "your money", "transfer fee", "activation charg", "registration charg",
+    "processing fee", "delivery fee", "compensation", "atm card",
+    "tracking number", "pick up the money", "daily transfer",
 ]
 
 MONEY_SCAM_KEYWORDS = [
@@ -159,6 +182,25 @@ def _check_envelope_spoof(parsed: ParsedEmail, signals: List[Dict[str, Any]]) ->
                 f"Reply-To domain ({rt_dom}) differs from From domain ({parsed.from_domain})",
                 f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
             ))
+        elif parsed.reply_to and parsed.reply_to.lower() != parsed.from_addr.lower():
+            # Same domain, DIFFERENT identity: the reply goes to a second
+            # attacker-controlled mailbox. Fire only when the reply-to
+            # local part looks institutional/role-based — 'we will reply
+            # from a different personal mailbox' is not a normal pattern.
+            rt_local = parsed.reply_to.rsplit("@", 1)[0].lower()
+            from_local = (parsed.from_addr or "").rsplit("@", 1)[0].lower()
+            norm_rt = normalize_confusables(rt_local)
+            institutional = any(
+                kw in norm_rt for kw in INSTITUTION_KEYWORDS + list(BRANDS)
+            )
+            if institutional:
+                signals.append(_signal(
+                    "reply_to_identity_divergence", W_MEDHIGH,
+                    f"Reply-To ({parsed.reply_to}) is a different identity "
+                    f"than the From ({parsed.from_addr}) on the same domain — "
+                    "replies are silently redirected to another mailbox",
+                    f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
+                ))
 
 
 def _check_display_name(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -375,17 +417,44 @@ def _check_base64_blobs(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> N
 
 def _check_free_webmail_impersonation(parsed: ParsedEmail,
                                       signals: List[Dict[str, Any]]) -> None:
+    """Institution claims from a free-webmail From address.
+
+    Scans display name, subject, AND body — real 419 mail signs off as
+    'Chief financial officer, MoneyGram OFFICE CANADA' from a gmail.com
+    address. The claim can live anywhere in the email.
+    """
     if parsed.from_domain not in FREE_WEBMAIL_DOMAINS:
         return
+    haystack = _haystack(parsed)
     display = (parsed.from_display or "").lower()
-    subject = (parsed.subject or "").lower()
-    hit = next((kw for kw in INSTITUTION_KEYWORDS if kw in display or kw in subject), None)
+    hit = next((kw for kw in INSTITUTION_KEYWORDS
+                if kw in haystack or kw in display), None)
     if hit:
         signals.append(_signal(
-            "free_webmail_impersonation", W_MED,
-            f"Sender claims '{hit}' from free webmail provider ({parsed.from_domain})",
-            f"From: {parsed.from_display} <{parsed.from_addr}>; Subject: {parsed.subject}",
+            "free_webmail_impersonation", W_MEDHIGH,
+            f"Institution claim ('{hit}') sent from free webmail "
+            f"({parsed.from_domain}) — no real institution does this",
+            f"From: {parsed.from_display} <{parsed.from_addr}>; "
+            f"matched '{hit}'",
         ))
+    # Brand mention anywhere while sending from free webmail: the MoneyGram
+    # scam class — brand impersonated in body, sender on gmail/yahoo.
+    for brand in BRANDS:
+        if brand == "outlook" or brand in ("google", "icloud"):
+            continue  # brands owned BY webmail providers
+        norm_brand = normalize_confusables(brand)
+        if re.search(rf"\b{re.escape(norm_brand)}\b", haystack):
+            legit_domains = BRANDS[brand]
+            if parsed.from_domain not in legit_domains:
+                signals.append(_signal(
+                    "webmail_brand_impersonation", W_HIGH,
+                    f"Email claims to be from brand '{brand}' but is sent "
+                    f"from free webmail ({parsed.from_domain}) — "
+                    "classic advance-fee impersonation",
+                    f"From: {parsed.from_display} <{parsed.from_addr}>; "
+                    f"brand '{brand}' in body/subject",
+                ))
+                break
 
 
 def _haystack(parsed: ParsedEmail) -> str:
@@ -397,6 +466,20 @@ def _haystack(parsed: ParsedEmail) -> str:
 def _check_money_scam(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     text = _haystack(parsed)
     fired = [kw for kw in MONEY_SCAM_KEYWORDS if kw in text]
+    # Structural amount pattern: large sums + release language, any
+    # currency. Catches the '($3.7 million CANADA DOLLARS)' phrasings no
+    # fixed keyword list covers.
+    amounts = MONEY_AMOUNT_RE.findall(text)
+    release = [kw for kw in RELEASE_LANGUAGE if kw in text]
+    if amounts and release:
+        signals.append(_signal(
+            "advance_fee_structure", W_MEDHIGH,
+            f"Large money amount ({len(amounts)}x) paired with release/"
+            f"fee language ({len(release)}x) — advance-fee scam structure",
+            f"amounts: {', '.join(amounts[:3])}; release: "
+            f"{', '.join(release[:3])}",
+        ))
+        fired = fired or ["advance-fee structure"]
     if fired:
         weight = W_MEDHIGH if len(fired) <= 2 else W_HIGH
         signals.append(_signal(
