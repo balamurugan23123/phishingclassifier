@@ -14,8 +14,11 @@ venv/
 # Threat-intel cache
 cache/
 
-# Real corpus data
+# Real corpus data — NEVER commit (victim data, live lure URLs, licensing)
 data/corpus/
+# Large Kaggle datasets stay local; only the hand-crafted sample ships
+samples/*.csv
+!samples/labeled_sample.csv
 
 # Generated reports
 reports/output/
