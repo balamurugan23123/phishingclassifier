@@ -54,6 +54,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     train.add_argument("--json", dest="json_out", metavar="PATH",
                        help="Write training metrics JSON to this path")
 
+    evaluate = sub.add_parser(
+        "evaluate", help="Score the deployed model on UNSEEN datasets "
+                         "(no refitting — honesty check)")
+    evaluate.add_argument("csv_paths", nargs="+",
+                          help="Labeled CSV file(s) the model was NOT "
+                               "trained on")
+    evaluate.add_argument("--max-rows", type=int, default=0,
+                          help="Cap rows per source (0 = all)")
+    evaluate.add_argument("--json", dest="json_out", metavar="PATH",
+                          help="Write evaluation report JSON to this path")
+
     return ap
 
 
@@ -338,6 +349,49 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Honesty check: deployed model vs truly unseen datasets."""
+    import json as json_mod
+    import time as time_mod
+
+    from .ml import evaluate_on_datasets
+
+    t0 = time_mod.monotonic()
+    print("Evaluating the DEPLOYED model (loaded from disk, no refitting)")
+    print("Eval sources:")
+    for p in args.csv_paths:
+        print(f"  {p}")
+    print()
+    try:
+        report = evaluate_on_datasets(args.csv_paths,
+                                      max_rows_per_source=args.max_rows)
+    except RuntimeError as exc:
+        print(f"Cannot evaluate: {exc}", file=sys.stderr)
+        return 2
+
+    ov = report["overall"]
+    print(f"{'source':<28}{'rows':>6}{'acc':>8}{'prec':>8}{'rec':>8}{'f1':>8}")
+    for name, s in sorted(report["per_source"].items()):
+        print(f"{name:<28}{s['rows']:>6}{s['accuracy']:>8.1%}"
+              f"{s['precision']:>8.1%}{s['recall']:>8.1%}{s['f1']:>8.1%}")
+    print("-" * 66)
+    print(f"{'OVERALL':<28}{ov['rows']:>6}{ov['accuracy']:>8.1%}"
+          f"{ov['precision']:>8.1%}{ov['recall']:>8.1%}{ov['f1']:>8.1%}")
+    print()
+    print("These are datasets the model did NOT train on — this is the")
+    print("real-world estimate. Per-source rows show exactly where it")
+    print("fails; low recall on a source = a scam family it has not")
+    print("learned. Retrain adding that family to improve it.")
+    print(f"(eval took {time_mod.monotonic() - t0:.0f}s)")
+
+    if args.json_out:
+        Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_out).write_text(
+            json_mod.dumps(report, indent=2), encoding="utf-8")
+        print(f"[+] Evaluation report JSON: {args.json_out}")
+    return 0
+
+
 def main(argv=None) -> int:
     args = _build_arg_parser().parse_args(argv)
     if args.command == "analyze":
@@ -348,6 +402,8 @@ def main(argv=None) -> int:
         return cmd_validate(args)
     if args.command == "train":
         return cmd_train(args)
+    if args.command == "evaluate":
+        return cmd_evaluate(args)
     return 1
 
 

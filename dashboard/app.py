@@ -78,6 +78,8 @@ section[data-testid="stSidebar"]{border-right:1px solid var(--line)}
  color:var(--txt);font-variant-numeric:tabular-nums;line-height:1}
 .pc-stat-l{font-size:10px;letter-spacing:.14em;color:var(--txt-dim);
  text-transform:uppercase;margin-top:4px}
+.pc-stat-foot{font-size:11px;color:var(--txt-dim);line-height:1.55;
+ padding-bottom:16px;max-width:900px;margin-top:-6px}
 /* ---- verdict distribution bar ----------------------------------------- */
 .pc-distro-bar{display:flex;height:46px;margin:12px 0 4px 0;border-radius:4px;
  overflow:hidden;border:1px solid var(--line)}
@@ -94,7 +96,9 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
 .stTabs [data-baseweb="tab"]{font-family:var(--font-mono) !important;
  font-size:13px !important;font-weight:500 !important;color:var(--txt-mut) !important;
  background:transparent !important;border-radius:4px 4px 0 0 !important;
- padding:8px 18px !important;line-height:24px !important}
+ padding:8px 22px !important;line-height:24px !important}
+.stTabs [data-baseweb="tab"] svg{width:14px;height:14px;margin-right:6px;
+ opacity:.7}
 .stTabs [data-baseweb="tab-highlight"],.stTabs [data-baseweb="tab-border"]{
  display:none !important}
 .stTabs [aria-selected="true"]{color:var(--txt) !important;
@@ -467,9 +471,11 @@ def _sidebar_integrations() -> None:
   <span class='pc-pill {"ok" if state_info["urlscan"] else ""}'>
    {"key configured" if state_info["urlscan"] else "no key"}</span>
  </div>
- <div class='pc-int-note'>search-only: lure URLs are never submitted
- for scanning (opsec — no attacker tip-off). Keys: <b>.env</b> locally,
- Cloud <b>Secrets</b> on Streamlit Cloud.</div>
+ <div class='pc-int-note'>Link lookups are read-only: the tool checks
+ what scanners already know about a link and never submits your email's
+ links for new scans, so a scammer's site gets no alert that it's being
+ investigated. Keys live in <b>.env</b> locally or <b>Secrets</b> when
+ hosted.</div>
 </div>""", unsafe_allow_html=True)
 
 
@@ -490,32 +496,38 @@ def main() -> None:
  <div style="min-width:0;flex:1 1 420px">
   <p class="pc-lead">Phishing email investigation</p>
   <h1 class="pc-title">Phishing Classifier</h1>
-  <p class="pc-tag">Triage bench for suspicious mail — paste a raw email,
-  and get rule-based scoring, a machine-learning second opinion, and
-  IOC extraction with analyst-safe rendering.</p>
+  <p class="pc-tag">Paste in a suspicious email and see why it looks
+  phishy — the rule check explains every point it scores, the ML model
+  gives a second opinion, and any links or sender addresses it finds are
+  listed as plain text.</p>
   <div class="pc-chips">
-   <span class="pc-chip"><b>20+</b> explainable signals</span>
-   <span class="pc-chip"><b>ML</b> second opinion · CV F1 0.96</span>
-   <span class="pc-chip"><b>VT / urlscan</b> enrichment</span>
-   <span class="pc-chip">runs <b>server-side</b> — nothing stored</span>
+   <span class="pc-chip"><b>20+</b> explained signals</span>
+   <span class="pc-chip"><b>ML</b> second opinion</span>
+   <span class="pc-chip"><b>VirusTotal / urlscan</b> link lookups</span>
+   <span class="pc-chip">analyzed on the server, nothing stored</span>
   </div>
  </div>
  <div class="pc-stat-strip">
-  <div class="pc-stat"><div class="pc-stat-n">96<span style="font-size:16px">%</span></div>
-   <div class="pc-stat-l">CV F1 macro</div></div>
+  <div class="pc-stat"><div class="pc-stat-n">42<span style="font-size:16px">%</span></div>
+   <div class="pc-stat-l">F1 on unseen corpora*</div></div>
   <div class="pc-stat"><div class="pc-stat-n">10k</div>
-   <div class="pc-stat-l">training rows</div></div>
-  <div class="pc-stat"><div class="pc-stat-n">0</div>
-   <div class="pc-stat-l">false positives</div></div>
+   <div class="pc-stat-l">emails trained on</div></div>
+  <div class="pc-stat"><div class="pc-stat-n">95<span style="font-size:16px">%</span></div>
+   <div class="pc-stat-l">F1 on advance-fee scams it knows</div></div>
  </div>
 </div>
+<div class="pc-stat-foot">* Leave-one-corpus-out average — each corpus was
+scored by a model that never saw it. That is the real generalization
+number; the 96% figure holds only inside the training corpora. The rule
+engine, not the ML layer, is the primary verdict — see the README for the
+full per-corpus breakdown and known blind spots.</div>
 """
     st.markdown(hero_html, unsafe_allow_html=True)
-    st.caption("Heuristic scores are analyst aids, not verdicts. "
-               "IOC URLs render as plain text; never click or scan them.")
+    st.caption("Scores are decision support, not proof. Treat every link "
+               "in a suspicious email as live: don't click, don't scan.")
 
     tab_demo, tab_paste, tab_upload, tab_batch = st.tabs(
-        ["Prebuilt demo", "Paste raw email", "Upload .eml", "Batch file"])
+        ["Try the demo", "Paste an email", "Upload files", "Earlier results"])
 
     # sidebar is global: integrations render exactly once, not per-tab
     with st.sidebar:
@@ -523,9 +535,10 @@ def main() -> None:
 
     with tab_demo:
         st.markdown(
-            "<div class='pc-dropzone'>Bundled fixture emails — "
-            "display-name spoof, credential harvester, and a legitimate "
-            "notification. Same pipeline as real analysis.</div>",
+            "<div class='pc-dropzone'>New here? Start with three sample "
+            "emails — a fake PayPal notice, a fake invoice with a "
+            "credential-stealing link, and a real GitHub notification for "
+            "comparison. You'll see how each one gets picked apart.</div>",
             unsafe_allow_html=True,
         )
         fixtures = _ROOT / "tests" / "fixtures"
@@ -543,9 +556,11 @@ def main() -> None:
 
     with tab_paste:
         st.markdown(
-            "<div class='pc-dropzone'>Paste full raw email — headers and "
-            "body, as exported by 'Show original'. Parsed in memory, "
-            "never stored.</div>",
+            "<div class='pc-dropzone'>Have a suspicious email in your "
+            "inbox? In Gmail or Outlook, open it, choose <b>show "
+            "original</b>, copy everything, and paste it here. The full "
+            "raw email — headers included — gives the most accurate "
+            "results.</div>",
             unsafe_allow_html=True,
         )
         pasted = st.text_area(
@@ -557,13 +572,19 @@ def main() -> None:
         )
         if st.button("Analyze pasted email", type="primary"):
             if not pasted.strip():
-                st.error("Paste a raw email first.")
+                st.error("Paste an email first — nothing to analyze.")
             else:
                 _render_cases([_analyze_bytes(
                     pasted.encode("utf-8", errors="replace"),
                     source="(pasted email)")])
 
     with tab_upload:
+        st.markdown(
+            "<div class='pc-dropzone'>Saved the email as a file? Drop "
+            ".eml files here — they're read in memory, analyzed, and "
+            "thrown away. Nothing is kept after you close the page.</div>",
+            unsafe_allow_html=True,
+        )
         uploads = st.file_uploader(
             "Upload .eml file(s)",
             type=["eml", "txt"],
@@ -574,27 +595,30 @@ def main() -> None:
                 _analyze_bytes(up.getvalue(), source=up.name)
                 for up in uploads
             ])
-        else:
-            st.markdown(
-                "<div class='pc-dropzone'>Drop .eml files here — analyzed "
-                "locally in memory, never stored or sent anywhere.</div>",
-                unsafe_allow_html=True,
-            )
 
     with tab_batch:
+        st.markdown(
+            "<div class='pc-dropzone'>Ran the command-line tool on a "
+            "folder of emails? That analysis is saved as a results file. "
+            "This tab loads it so you can browse and filter what was "
+            "already analyzed — handy for going through a whole inbox at "
+            "once.</div>",
+            unsafe_allow_html=True,
+        )
         try:
             batch_results = _load_results(args.json)
         except FileNotFoundError:
             st.info(
-                "No batch results file at "
-                f"`{_esc(Path(args.json).name)}`.\n\n"
-                "This tab reads the JSON produced by the CLI "
-                "(`analyze ... --json`). The committed demo file ships at "
-                "`samples/demo_batch/results.json`; point `--json` at it "
-                "or your own analysis output."
+                f"No results file found at `{_esc(Path(args.json).name)}`.\n\n"
+                "Run the CLI first: `python -m phishingclassifier.cli "
+                "analyze <folder> --json results.json`, then point this "
+                "tab at the file with `--json` when starting the app. A "
+                "sample results file ships with the project at "
+                "`samples/demo_batch/results.json`."
             )
         except json.JSONDecodeError:
-            st.error("Results file is not valid JSON.")
+            st.error("The results file isn't valid JSON — re-run the "
+                     "analysis that produced it.")
         else:
             c1, c2, c3 = st.columns([2, 2, 2])
             with c1:
