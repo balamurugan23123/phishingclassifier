@@ -136,7 +136,33 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
 .pc-meta .bad{color:var(--bad)}
 .pc-meta .warn{color:var(--warn)}
 .pc-lead-sm{font-size:11px;font-weight:700;letter-spacing:.14em;
- color:var(--txt-mut);text-transform:uppercase;margin:10px 0 4px 0}
+ color:var(--txt-mut);text-transform:uppercase;margin:12px 0 6px 0}
+/* ---- evidence internals: signal rows ---------------------------------- */
+.pc-sig{display:flex;align-items:baseline;gap:10px;padding:7px 10px;
+ border:1px solid var(--line-soft);border-left:2px solid var(--txt-dim);
+ border-radius:4px;margin-bottom:4px;background:var(--ink-2)}
+.pc-sig.w-hi{border-left-color:var(--bad)}
+.pc-sig.w-md{border-left-color:var(--warn)}
+.pc-sig.w-lo{border-left-color:var(--txt-dim)}
+.pc-sig-w{flex:none;font-family:var(--font-mono);font-size:11px;font-weight:700;
+ color:var(--ink-0);background:var(--txt-dim);border-radius:3px;
+ padding:1px 6px;min-width:26px;text-align:center}
+.pc-sig.w-hi .pc-sig-w{background:var(--bad);color:var(--ink-0)}
+.pc-sig.w-md .pc-sig-w{background:var(--warn);color:var(--ink-0)}
+.pc-sig-id{flex:none;font-size:12px;font-weight:700;color:var(--txt)}
+.pc-sig-reason{font-size:11.5px;color:var(--txt-mut);line-height:1.45;
+ overflow-wrap:anywhere}
+.pc-sig-empty{font-size:12px;color:var(--txt-dim);padding:10px 12px;
+ border:1px dashed var(--line);border-radius:4px}
+/* ---- enrichment lookup rows -------------------------------------------- */
+.pc-lk{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;
+ padding:6px 10px;border:1px solid var(--line-soft);border-radius:4px;
+ margin-bottom:3px;background:var(--ink-2);font-size:11.5px;color:var(--txt-mut)}
+.pc-lk-ioc{font-family:var(--font-mono);font-weight:700;color:var(--txt);
+ overflow-wrap:anywhere}
+.pc-lk-src{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--txt-dim)}
+.pc-lk .bad{color:var(--bad)}
 /* ---- dropzones / empty states ----------------------------------------- */
 .pc-dropzone{border:1px dashed rgba(34,211,238,.28);border-radius:6px;
  padding:26px 24px;background:rgba(34,211,238,.03);text-align:center;
@@ -293,35 +319,66 @@ def _render_cases(results: list) -> None:
         st.markdown(head_html, unsafe_allow_html=True)
 
         with st.expander("Evidence", expanded=False):
+            # ---- fired signals: weight chip + id + reason -------------------
             st.markdown("<p class='pc-lead-sm'>Fired signals</p>",
                         unsafe_allow_html=True)
             if r.get("signals"):
-                for s in sorted(r["signals"], key=lambda x: -x["weight"]):
-                    st.markdown(
-                        f"- `[{s['weight']:>2}]` **{s['id']}** — {s['reason']}"
-                    )
+                rows = []
+                for s in sorted(r["signals"],
+                                key=lambda x: (-x["weight"], x["id"])):
+                    w = s["weight"]
+                    if w >= 20:
+                        wcls = "w-hi"
+                    elif w >= 15:
+                        wcls = "w-md"
+                    else:
+                        wcls = "w-lo"
+                    rows.append(f"""
+<div class='pc-sig {wcls}'>
+ <span class='pc-sig-w'>{w}</span>
+ <span class='pc-sig-id'>{_esc(s['id'])}</span>
+ <span class='pc-sig-reason'>{_esc(s['reason'])}</span>
+</div>""")
+                st.markdown("".join(rows), unsafe_allow_html=True)
             else:
-                st.markdown("_No signals fired._")
+                st.markdown(
+                    "<div class='pc-sig-empty'>No signals fired — "
+                    "nothing in this email matched any rule.</div>",
+                    unsafe_allow_html=True)
 
-            st.markdown("<p class='pc-lead-sm'>IOCs (plain text)</p>", unsafe_allow_html=True)
+            # ---- IOCs: plain text, never clickable -------------------------
+            st.markdown("<p class='pc-lead-sm'>IOCs — plain text, "
+                        "never click or scan</p>", unsafe_allow_html=True)
             st.code("\n".join(_ioc_lines(r)) or "(none)", language="text")
 
+            # ---- enrichment lookups ----------------------------------------
             enrich = r.get("enrichment") or {}
             st.markdown("<p class='pc-lead-sm'>Enrichment — "
                         f"{enrich.get('mode', 'offline')}</p>",
                         unsafe_allow_html=True)
-            for lk in enrich.get("lookups", []):
-                st.markdown(
-                    f"- `{lk.get('ioc', '')}` — {lk.get('source', '')}: "
-                    f"malicious={lk.get('malicious', '')}, "
-                    f"reputation={lk.get('reputation', '')}"
-                )
+            lookups = enrich.get("lookups", [])
+            if lookups:
+                lk_rows = []
+                for lk in lookups:
+                    mal = lk.get("malicious")
+                    bad = "bad" if (isinstance(mal, (int, float))
+                                   and mal >= 3) else ""
+                    lk_rows.append(f"""
+<div class='pc-lk'>
+ <span class='pc-lk-ioc'>{_esc(lk.get('ioc', ''))}</span>
+ <span class='pc-lk-src'>{_esc(lk.get('source', ''))}</span>
+ <span class='{bad}'>malicious <b>{_esc(mal if mal is not None else '—')}</b></span>
+ <span>reputation <b>{_esc(lk.get('reputation', '—'))}</b></span>
+</div>""")
+                st.markdown("".join(lk_rows), unsafe_allow_html=True)
+            elif enrich.get("mode", "").startswith("live"):
+                st.markdown("_No lookups returned data._")
 
             if r.get("parser_warnings"):
                 st.markdown("<p class='pc-lead-sm'>Parser warnings</p>",
                             unsafe_allow_html=True)
                 for w in r["parser_warnings"]:
-                    st.markdown(f"- {w}")
+                    st.markdown(f"- {_esc(w)}")
         st.markdown("</div></div>", unsafe_allow_html=True)
 
 
