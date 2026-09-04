@@ -82,7 +82,8 @@ section[data-testid="stSidebar"]{border-right:1px solid var(--line)}
 .pc-distro-bar{display:flex;height:46px;margin:12px 0 4px 0;border-radius:4px;
  overflow:hidden;border:1px solid var(--line)}
 .pc-distro-seg{display:flex;align-items:center;padding:0 10px;
- font-size:11px;font-weight:700;color:var(--ink-0);white-space:nowrap}
+ font-size:11px;font-weight:700;color:var(--ink-0);white-space:nowrap;
+ overflow:hidden;text-overflow:ellipsis}
 .pc-distro-seg:first-child{clip-path:inset(0 0 0 0)}
 .pc-distro-caption{font-size:11px;color:var(--txt-dim);letter-spacing:.05em}
 /* ---- mode tabs (segmented control) ------------------------------------ */
@@ -109,8 +110,10 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
 .pc-case-inner{padding:12px 16px}
 .pc-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;
  border-bottom:1px solid var(--line-soft);padding-bottom:8px}
-.pc-rail{flex:none;width:86px;border-radius:4px;padding:6px 10px;
- color:var(--ink-0);text-align:center;position:relative;overflow:hidden}
+.pc-rail{flex:none;width:92px;border-radius:4px;padding:6px 10px;
+ color:var(--ink-0);text-align:center;position:relative;overflow:hidden;
+ display:flex;flex-direction:column;align-items:center;justify-content:center;
+ min-height:52px}
 .pc-rail::after{content:'';position:absolute;inset:0;
  background:linear-gradient(120deg,transparent 30%,rgba(11,15,18,.18) 50%,
  transparent 70%);transform:translateX(-100%);
@@ -118,8 +121,10 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
 @keyframes pc-scan{0%{transform:translateX(-100%)}55%,100%{transform:translateX(100%)}}
 .pc-rail-score{font-family:var(--font-display);font-size:22px;font-weight:700;
  line-height:1;font-variant-numeric:tabular-nums}
-.pc-rail-verdict{font-size:9.5px;font-weight:700;letter-spacing:.06em;
- text-transform:uppercase;margin-top:2px;white-space:nowrap}
+.pc-rail-verdict{font-size:9px;font-weight:700;letter-spacing:.05em;
+ text-transform:uppercase;margin-top:3px;line-height:1.25;
+ word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;
+ -webkit-box-orient:vertical;overflow:hidden;white-space:normal}
 .pc-head-file{font-family:var(--font-mono);font-size:14px;font-weight:700;
  color:var(--txt);min-width:0;overflow-wrap:anywhere}
 .pc-head-sub{font-size:12px;font-weight:500;color:var(--txt-mut);margin-top:2px;
