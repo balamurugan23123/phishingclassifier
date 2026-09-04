@@ -163,6 +163,30 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
 .pc-lk-src{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
  color:var(--txt-dim)}
 .pc-lk .bad{color:var(--bad)}
+/* ---- integrations status card (sidebar) -------------------------------- */
+.pc-int-card{border:1px solid var(--line);border-radius:6px;
+ background:var(--ink-1);padding:10px 12px;margin-top:2px}
+.pc-int-mode{font-size:12px;font-weight:700;letter-spacing:.12em;
+ color:var(--txt);text-transform:uppercase;display:flex;align-items:center;
+ gap:8px;margin-bottom:8px;padding-bottom:8px;
+ border-bottom:1px solid var(--line-soft)}
+.pc-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-dim);
+ flex:none;display:inline-block}
+.pc-dot.on{background:var(--ok);
+ box-shadow:0 0 0 0 rgba(74,222,128,.5);animation:pc-pulse 2s infinite}
+@keyframes pc-pulse{0%{box-shadow:0 0 0 0 rgba(74,222,128,.45)}
+ 70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+.pc-int-row{display:flex;align-items:center;justify-content:space-between;
+ gap:8px;margin:6px 0}
+.pc-int-name{font-size:12px;font-weight:500;color:var(--txt)}
+.pc-pill{font-size:10px;font-weight:600;letter-spacing:.04em;
+ color:var(--txt-dim);border:1px solid var(--line);border-radius:3px;
+ padding:2px 8px;text-transform:uppercase}
+.pc-pill.ok{color:var(--ok);border-color:rgba(74,222,128,.35);
+ background:rgba(74,222,128,.06)}
+.pc-int-note{font-size:10.5px;color:var(--txt-dim);line-height:1.5;
+ margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft)}
+.pc-int-note b{color:var(--txt-mut)}
 /* ---- dropzones / empty states ----------------------------------------- */
 .pc-dropzone{border:1px dashed rgba(34,211,238,.28);border-radius:6px;
  padding:26px 24px;background:rgba(34,211,238,.03);text-align:center;
@@ -179,6 +203,7 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
  .pc-case,.pc-case:hover{transform:none;transition:none}
  .pc-rail::after,.pc-dropzone::before{animation:none}
  .pc-rise{animation:none}
+ .pc-dot.on{animation:none}
  .pc-title{background:none;-webkit-text-fill-color:var(--txt);color:var(--txt)}
 }
 /* ---- streamlit resets ------------------------------------------------- */
@@ -410,8 +435,8 @@ def _sidebar_integrations() -> None:
     Degrades gracefully: any failure (including the package being
     unavailable) shows offline status instead of crashing the dashboard.
     """
-    st.header("Integrations")
-    state_info: dict = {"mode": "offline"}
+    st.markdown("<p class='pc-lead'>Integrations</p>", unsafe_allow_html=True)
+    state_info: dict = {"mode": "offline", "vt": False, "urlscan": False}
 
     _bridge_cloud_secrets()
     try:
@@ -426,16 +451,26 @@ def _sidebar_integrations() -> None:
     except Exception:
         pass  # status panel only — never a crash vector
 
-    if state_info.get("mode") == "live":
-        st.markdown("● **live** — threat-intel lookups active")
-        st.markdown(f"- VirusTotal: {'configured' if state_info.get('vt') else 'no key'}")
-        st.markdown(f"- urlscan.io: {'configured' if state_info.get('urlscan') else 'no key'}")
-    else:
-        st.markdown("○ **offline** — no API keys configured")
-        st.caption(
-            "Keys come from .env locally, or the app's Secrets "
-            "(VT_API_KEY / URLSCAN_API_KEY) on Streamlit Cloud."
-        )
+    live = state_info.get("mode") == "live"
+    dot = "<span class='pc-dot on'></span>" if live else "<span class='pc-dot'></span>"
+    mode_word = "LIVE" if live else "OFFLINE"
+    st.markdown(f"""
+<div class='pc-int-card'>
+ <div class='pc-int-mode'>{dot}{mode_word}</div>
+ <div class='pc-int-row'>
+  <span class='pc-int-name'>VirusTotal</span>
+  <span class='pc-pill {"ok" if state_info["vt"] else ""}'>
+   {"key configured" if state_info["vt"] else "no key"}</span>
+ </div>
+ <div class='pc-int-row'>
+  <span class='pc-int-name'>urlscan.io</span>
+  <span class='pc-pill {"ok" if state_info["urlscan"] else ""}'>
+   {"key configured" if state_info["urlscan"] else "no key"}</span>
+ </div>
+ <div class='pc-int-note'>search-only: lure URLs are never submitted
+ for scanning (opsec — no attacker tip-off). Keys: <b>.env</b> locally,
+ Cloud <b>Secrets</b> on Streamlit Cloud.</div>
+</div>""", unsafe_allow_html=True)
 
 
 def main() -> None:
