@@ -8,7 +8,11 @@ from typing import Any, Dict, List, Optional
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE = MODEL_DIR / "phish_model.joblib"
-MAX_TFIDF_FEATURES = 300
+# Character n-grams: less sensitive to era/corpus-specific word choice than
+# word n-grams — the leave-one-corpus-out experiment showed word vectors
+# memorize corpus fingerprints. 3-5 chars capture morphology + phrasing.
+MAX_TFIDF_FEATURES = 6000
+CHAR_NGRAM_RANGE = (3, 5)
 # Below this row count gradient boosting cannot learn (each leaf needs
 # samples); the trainer switches to logistic regression instead.
 SMALL_DATA_ROWS = 200
@@ -246,9 +250,9 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     vec = DictVectorizer(sparse=False)
     tfidf = TfidfVectorizer(
-        ngram_range=(1, 2), max_features=MAX_TFIDF_FEATURES,
-        sublinear_tf=True, strip_accents="unicode", stop_words="english",
-        min_df=1,
+        analyzer="char_wb", ngram_range=CHAR_NGRAM_RANGE,
+        max_features=MAX_TFIDF_FEATURES, sublinear_tf=True,
+        strip_accents="unicode", min_df=2, lowercase=True,
     )
     F = vec.fit_transform(X_feats)
     T = tfidf.fit_transform(X_text)
