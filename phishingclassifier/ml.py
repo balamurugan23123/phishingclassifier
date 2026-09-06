@@ -16,6 +16,10 @@ CHAR_NGRAM_RANGE = (3, 5)
 # Below this row count gradient boosting cannot learn (each leaf needs
 # samples); the trainer switches to logistic regression instead.
 SMALL_DATA_ROWS = 200
+# Above this row count the dense matrix gradient boosting needs stops
+# fitting in RAM (160k x 6.6k x 8B ~ 8.5GB); the trainer switches to
+# sparse-native logistic regression with MaxAbs-scaled engineered features.
+DENSE_MAX_ROWS = 25000
 
 KNOWN_SIGNAL_IDS = [
     "spf_fail", "dkim_fail", "dmarc_fail", "auth_header_absent",
@@ -212,13 +216,14 @@ def save_model(pipe) -> None:
 def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Train on [{parsed, label, source}] entries; returns eval metrics.
 
-    Design: engineered features (DictVectorizer) hstacked with TF-IDF word
-    n-grams, then a linear or boosted classifier depending on data size —
-    gradient boosting cannot learn from tiny datasets (its leaves need
-    samples), so < SMALL_DATA_ROWS uses LogisticRegression (which also
-    gives well-calibrated probabilities), larger sets use
-    HistGradientBoosting. Stratified 5-fold CV gives the honest
-    out-of-sample estimate; the final model is fit on all rows.
+    Design: engineered features (DictVectorizer) hstacked with TF-IDF char
+    n-grams, then a size-appropriate classifier:
+    - tiny (<200 rows): LogisticRegression (boosting can't learn)
+    - medium (<=25k):   HistGradientBoosting, dense matrix fits RAM
+    - large (>25k):     sparse LogisticRegression (MaxAbs-scaled) — the
+      dense matrix GBDT needs would not fit in RAM at full-corpus scale.
+    Stratified 5-fold CV gives the honest out-of-sample estimate; the
+    final model is fit on all rows.
     """
     import numpy as np
     import scipy.sparse as sp
@@ -227,6 +232,7 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     from sklearn.linear_model import LogisticRegression
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.preprocessing import MaxAbsScaler
 
     labeled = [r for r in rows if r.get("label") in (0, 1)]
     if len(labeled) < 10:
@@ -256,23 +262,38 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
     F = vec.fit_transform(X_feats)
     T = tfidf.fit_transform(X_text)
-    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    X = sp.hstack([sp.csr_matrix(F), T]).tocsr()
     y_arr = np.array(y)
 
-    if len(labeled) < SMALL_DATA_ROWS:
+    n = len(labeled)
+    scaler = None
+    if n < SMALL_DATA_ROWS:
         clf = LogisticRegression(max_iter=2000, C=1.0, random_state=42)
         model_kind = "ml-logreg"
-    else:
+        X = X.toarray()  # tiny data: dense is trivially cheap
+    elif n <= DENSE_MAX_ROWS:
         clf = HistGradientBoostingClassifier(
             max_iter=200, learning_rate=0.1, random_state=42,
         )
         model_kind = "ml-gbdt"
+        X = X.toarray()  # GBDT needs dense; fits RAM at this scale
+    else:
+        # Large-corpus sparse path: scale so engineered (counts, lengths)
+        # and TF-IDF ranges don't fight each other for coefficient space.
+        # saga needs iterations at 6.6k features; 10k converges for real.
+        scaler = MaxAbsScaler()
+        X = scaler.fit_transform(X)
+        clf = LogisticRegression(max_iter=10000, C=1.0, random_state=42,
+                                 solver="saga", tol=1e-4)
+        model_kind = "ml-logreg-saga"
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(clf, X, y_arr, cv=cv, scoring="f1_macro")
     clf.fit(X, y_arr)
-    save_model({"vec": vec, "tfidf": tfidf, "clf": clf,
-                "kind": model_kind})
+    bundle = {"vec": vec, "tfidf": tfidf, "clf": clf, "kind": model_kind}
+    if scaler is not None:
+        bundle["scaler"] = scaler
+    save_model(bundle)
 
     return {
         "rows": len(labeled),
@@ -300,6 +321,7 @@ def evaluate_on_datasets(paths: List[str],
     if bundle is None or not isinstance(bundle, dict):
         raise RuntimeError("No trained model on disk — train first.")
     vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
+    scaler = bundle.get("scaler")
 
     from .csv_adapter import load_csv_dataset
     from .heuristics import analyze_signals
@@ -320,7 +342,8 @@ def evaluate_on_datasets(paths: List[str],
             text = _text_for_tfidf(parsed)
             F = vec.transform([feats])
             T = tfidf.transform([text])
-            X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+            X = sp.hstack([sp.csr_matrix(F), T])
+            X = scaler.transform(X) if scaler is not None else X.toarray()
             proba = clf.predict_proba(X)[0]
             classes = list(getattr(clf, "classes_", [0, 1]))
             idx = classes.index(1) if 1 in classes else 1
@@ -367,11 +390,15 @@ def classify(parsed, signals: List[Dict[str, Any]],
     if bundle is None or not isinstance(bundle, dict):
         return None
     vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
+    scaler = bundle.get("scaler")
     feats = _featurize(parsed, signals, iocs)
     text = _text_for_tfidf(parsed)
     F = vec.transform([feats])
     T = tfidf.transform([text])
-    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    X = sp.hstack([sp.csr_matrix(F), T])
+    # inference format must mirror training: saga models got MaxAbs-scaled
+    # sparse input; logreg/gbdt models got dense unscaled input
+    X = scaler.transform(X) if scaler is not None else X.toarray()
     proba = clf.predict_proba(X)[0]
     classes = list(getattr(clf, "classes_", [0, 1]))
     idx = classes.index(1) if 1 in classes else 1
