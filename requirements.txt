@@ -4,7 +4,10 @@
 # - scikit-learn + joblib: ML classifier (train/classify)
 # - requests: live threat-intel enrichment (optional at runtime,
 #   gracefully skipped when absent)
+# - sentry-sdk: error monitoring (optional at runtime; no-op without
+#   SENTRY_DSN in env/.env/secrets)
 streamlit==1.63.0
 scikit-learn==1.9.0
 joblib==1.6.0
 requests==2.32.5
+sentry-sdk==2.68.1

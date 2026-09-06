@@ -16,6 +16,13 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
+from phishingclassifier import observability
+
+# Error monitoring: starts only when a DSN is present (env, .env, or
+# Streamlit Cloud secrets — bridged below). Evidence-scrubbing is inside
+# the module; the DSN lookup itself needs no secrets here.
+observability.init()
+
 st.set_page_config(
     page_title="Phishing Classifier — triage",
     page_icon="shark",
@@ -424,7 +431,7 @@ def _bridge_cloud_secrets() -> None:
     try:
         if not hasattr(st, "secrets"):
             return
-        for name in ("VT_API_KEY", "URLSCAN_API_KEY"):
+        for name in ("VT_API_KEY", "URLSCAN_API_KEY", "SENTRY_DSN"):
             if not os.environ.get(name):
                 value = st.secrets.get(name)
                 if value:
@@ -480,6 +487,17 @@ def _sidebar_integrations() -> None:
 
 
 def main() -> None:
+    try:
+        _main()
+    except Exception as exc:  # crash page + telemetry; never a bare stack
+        observability.capture_exception(exc, surface="dashboard")
+        st.error("Something broke while building this page. The error has "
+                 "been logged." if observability.enabled()
+                 else "Something broke while building this page.")
+        raise
+
+
+def _main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--json",

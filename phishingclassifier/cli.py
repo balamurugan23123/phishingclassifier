@@ -393,18 +393,30 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
 
 def main(argv=None) -> int:
+    from . import observability
+
+    observability.init()
     args = _build_arg_parser().parse_args(argv)
-    if args.command == "analyze":
-        return cmd_analyze(args)
-    if args.command == "stats":
-        return cmd_stats(args)
-    if args.command == "validate":
-        return cmd_validate(args)
-    if args.command == "train":
-        return cmd_train(args)
-    if args.command == "evaluate":
-        return cmd_evaluate(args)
-    return 1
+    try:
+        if args.command == "analyze":
+            return cmd_analyze(args)
+        if args.command == "stats":
+            return cmd_stats(args)
+        if args.command == "validate":
+            return cmd_validate(args)
+        if args.command == "train":
+            return cmd_train(args)
+        if args.command == "evaluate":
+            return cmd_evaluate(args)
+        return 1
+    except KeyboardInterrupt:
+        print("\n[interrupted]", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        observability.capture_exception(exc, surface="cli",
+                                        command=args.command)
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
