@@ -518,9 +518,22 @@ def _check_free_webmail_impersonation(parsed: ParsedEmail,
 
 
 def _haystack(parsed: ParsedEmail) -> str:
-    raw = (parsed.subject + "\n" + parsed.text_body + "\n" +
-           re.sub(r"<[^>]+>", " ", parsed.html_body)).lower()
-    return normalize_confusables(raw)
+    """Lowercased, confusable-normalized subject+body+stripped-HTML.
+
+    Expensive (regex tag-strip + NFKC + per-char leet mapping) and read by
+    six different checks against the same email. Memoize on the instance,
+    keyed on the source fields so the cache stays correct if any are ever
+    reassigned between calls.
+    """
+    key = (parsed.subject, parsed.text_body, parsed.html_body)
+    cached = getattr(parsed, "_haystack_cache", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    raw = ((parsed.subject or "") + "\n" + (parsed.text_body or "") + "\n" +
+           re.sub(r"<[^>]+>", " ", parsed.html_body or "")).lower()
+    result = normalize_confusables(raw)
+    parsed._haystack_cache = (key, result)
+    return result
 
 
 def _check_money_scam(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:

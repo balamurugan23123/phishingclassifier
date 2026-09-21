@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from phishingclassifier.heuristics import analyze_signals
+from phishingclassifier.heuristics import analyze_signals, _haystack
 from phishingclassifier.parser import parse_eml
 from phishingclassifier.report import batch_json, build_result, markdown_report
 from phishingclassifier.scoring import score_result, verdict_for
@@ -113,3 +113,15 @@ def test_batch_json_sorts_by_score():
     data = json.loads(payload)
     scores = [r["score"]["score"] for r in data["results"]]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_haystack_is_memoized_and_invalidates_on_change():
+    parsed = parse_eml(str(FIXTURES / "spoofed.eml"))
+    first = _haystack(parsed)
+    # repeated calls return the identical cached object (no recompute)
+    assert _haystack(parsed) is first
+    # mutating a source field must invalidate the cache
+    parsed.subject = "Totally Different Subject XYZZY"
+    second = _haystack(parsed)
+    assert second is not first
+    assert "totally different subject" in second
