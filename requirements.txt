@@ -2,12 +2,16 @@
 # Core tool is stdlib-first; these are the third-party pieces:
 # - streamlit: dashboard
 # - scikit-learn + joblib: ML classifier (train/classify)
+# - numpy + scipy: imported directly by ml.py (arrays, sparse hstack); pinned
+#   explicitly instead of relying on scikit-learn pulling them transitively
 # - requests: live threat-intel enrichment (optional at runtime,
 #   gracefully skipped when absent)
 # - sentry-sdk: error monitoring (optional at runtime; no-op without
 #   SENTRY_DSN in env/.env/secrets)
 streamlit==1.63.0
 scikit-learn==1.9.0
+numpy==2.5.2
+scipy==1.18.1
 joblib==1.6.0
 requests==2.32.5
 sentry-sdk==2.68.1
