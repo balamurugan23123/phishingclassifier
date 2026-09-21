@@ -50,9 +50,58 @@ def test_cache_written_atomically(tmp_path, monkeypatch):
     cache_file = tmp_path / "cache" / "vt_cache.json"
     assert cache_file.is_file()
     data = json.loads(cache_file.read_text(encoding="utf-8"))
-    assert data["vt:/ip_addresses/1.2.3.4"]["data"]["ok"] is True
+    entry = data["vt:/ip_addresses/1.2.3.4"]
+    # envelope carries a timestamp + the cached value
+    assert "at" in entry
+    assert entry["value"]["data"]["ok"] is True
     leftovers = list((tmp_path / "cache").glob("*.tmp"))
     assert leftovers == []
+
+
+def _state_with_key(tmp_path, monkeypatch, **kw):
+    monkeypatch.setenv("VT_API_KEY", "dummy-key")
+    monkeypatch.delenv("VT_CACHE_TTL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return EnrichmentState(workdir=str(tmp_path), **kw)
+
+
+def test_cache_hit_within_ttl(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=3600)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    assert state._cached("vt:/domains/evil.com") == {"malicious": 5}
+    assert state.cache_hits == 1
+
+
+def test_cache_expires_after_ttl(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=100)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    # backdate the stored timestamp past the TTL
+    state._cache["vt:/domains/evil.com"]["at"] -= 1000
+    assert state._cached("vt:/domains/evil.com") is None
+    assert state.cache_expired >= 1
+    # stale entry is dropped from the cache and file
+    assert "vt:/domains/evil.com" not in state._cache
+
+
+def test_zero_ttl_disables_cache(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=0)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    assert state._cached("vt:/domains/evil.com") is None
+
+
+def test_legacy_entry_without_envelope_is_stale(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=3600)
+    # simulate a pre-TTL cache file: value stored with no envelope
+    state._cache["vt:/domains/old.com"] = {"malicious": 9}
+    assert state._cached("vt:/domains/old.com") is None
+
+
+def test_ttl_read_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "dummy-key")
+    monkeypatch.setenv("VT_CACHE_TTL", "60")
+    monkeypatch.chdir(tmp_path)
+    state = EnrichmentState(workdir=str(tmp_path))
+    assert state.cache_ttl == 60
 
 
 def test_vt_free_tier_pacing(monkeypatch, tmp_path):

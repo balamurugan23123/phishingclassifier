@@ -15,6 +15,12 @@ VT_BASE = "https://www.virustotal.com/api/v3"
 VT_MIN_INTERVAL = 15.5
 URLSCAN_BASE = "https://urlscan.io/api/v1"
 
+# Threat intelligence goes stale: a domain that is clean today may be
+# weaponized tomorrow. Cached verdicts expire after this many seconds so a
+# returning analyst is not fed outdated signals. Override via the
+# VT_CACHE_TTL env var (seconds; 0 disables caching entirely).
+DEFAULT_CACHE_TTL = 24 * 3600
+
 _CACHE_SUBDIR = "cache"
 _CACHE_FILE = "vt_cache.json"
 
@@ -22,18 +28,32 @@ _CACHE_FILE = "vt_cache.json"
 class EnrichmentState:
     """Tracks API keys, cache, and rate limiting."""
 
-    def __init__(self, offline: bool = False, workdir: str = ".") -> None:
+    def __init__(self, offline: bool = False, workdir: str = ".",
+                 cache_ttl: Optional[int] = None) -> None:
         self.offline = offline
         self.cache_path = Path(workdir) / _CACHE_SUBDIR / _CACHE_FILE
+        self.cache_ttl = self._resolve_ttl(cache_ttl)
         self.vt_key: Optional[str] = None
         self.urlscan_key: Optional[str] = None
         self._cache: Dict[str, Any] = {}
         self._last_vt_request = 0.0
         self.requests_made = 0
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.cache_expired = 0
         self.errors: List[str] = []
         self._load_keys(workdir)
         if self.vt_key or self.urlscan_key:
             self._load_cache()
+
+    @staticmethod
+    def _resolve_ttl(cache_ttl: Optional[int]) -> int:
+        """Explicit arg wins, then VT_CACHE_TTL env, then the default."""
+        raw = cache_ttl
+        if raw is None:
+            env = os.environ.get("VT_CACHE_TTL", "").strip()
+            raw = int(env) if env.lstrip("+").isdigit() else DEFAULT_CACHE_TTL
+        return max(0, int(raw))
 
     def _load_keys(self, workdir: str = ".") -> None:
         # .env lookup order: explicit workdir (tests pass tmp_path to
@@ -86,6 +106,32 @@ class EnrichmentState:
                 )
         except (OSError, json.JSONDecodeError):
             self._cache = {}
+        # Drop stale (and legacy, untimed) entries so the cache file cannot
+        # grow without bound and never serves outdated verdicts.
+        if self._prune_expired():
+            self._save_cache()
+
+    def _is_stale(self, entry: Any) -> bool:
+        """True when an entry is missing its envelope or has aged past TTL.
+
+        Legacy entries written before TTL support lack the envelope and are
+        treated as stale on purpose: better to refetch than trust a verdict
+        we cannot date.
+        """
+        if not isinstance(entry, dict) or "at" not in entry \
+                or "value" not in entry:
+            return True
+        if self.cache_ttl <= 0:
+            return True
+        return (time.time() - entry["at"]) > self.cache_ttl
+
+    def _prune_expired(self) -> bool:
+        """Remove stale entries; return True if anything was dropped."""
+        dropped = [k for k, v in self._cache.items() if self._is_stale(v)]
+        for k in dropped:
+            self._cache.pop(k, None)
+            self.cache_expired += 1
+        return bool(dropped)
 
     def _save_cache(self) -> None:
         """Atomic write to cache file."""
@@ -109,12 +155,20 @@ class EnrichmentState:
 
     def _cached(self, key: str) -> Optional[Dict[str, Any]]:
         entry = self._cache.get(key)
-        if isinstance(entry, dict):
-            return entry
-        return None
+        if entry is None:
+            self.cache_misses += 1
+            return None
+        if self._is_stale(entry):
+            self._cache.pop(key, None)
+            self.cache_expired += 1
+            self._save_cache()
+            self.cache_misses += 1
+            return None
+        self.cache_hits += 1
+        return entry["value"]
 
     def _put_cache(self, key: str, value: Dict[str, Any]) -> None:
-        self._cache[key] = value
+        self._cache[key] = {"at": time.time(), "value": value}
         self._save_cache()
 
     def _http_get(self, url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:

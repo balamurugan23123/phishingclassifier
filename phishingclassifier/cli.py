@@ -24,6 +24,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     analyze.add_argument("target", help=".eml file or folder of .eml files")
     analyze.add_argument("--offline", action="store_true",
                          help="Skip live threat-intel enrichment")
+    analyze.add_argument("--vt-cache-ttl", type=int, default=None,
+                         metavar="SECONDS",
+                         help="Max age of cached threat-intel results before "
+                              "refetching (default 86400; 0 disables cache)")
     analyze.add_argument("--json", dest="json_out", metavar="PATH",
                          help="Write batch results JSON to this path")
     analyze.add_argument("--md-dir", metavar="DIR", default="reports/output",
@@ -139,7 +143,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print(f"No .eml files found at: {args.target}", file=sys.stderr)
         return 2
 
-    state = EnrichmentState(offline=args.offline)
+    state = EnrichmentState(offline=args.offline,
+                            cache_ttl=getattr(args, "vt_cache_ttl", None))
     results = []
     md_written = []
 
