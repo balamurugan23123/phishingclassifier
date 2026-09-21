@@ -223,6 +223,18 @@ def _enrichment_feedback_signals(result, enrichment: dict) -> list:
                         f"ioc={ioc} verdicts={verdicts}",
                     )
                 )
+        elif source == "safebrowsing":
+            if lk.get("malicious"):
+                types = [t for t in (lk.get("threat_types") or []) if isinstance(t, str)]
+                sigs.append(
+                    _signal(
+                        "safebrowsing_malicious_verdict",
+                        W_HIGH,
+                        "Google Safe Browsing flags this URL: "
+                        + (", ".join(types) if types else "malicious"),
+                        f"ioc={ioc} types={types}",
+                    )
+                )
     return sigs
 
 

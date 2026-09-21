@@ -119,11 +119,18 @@ def test_enrichment_feedback_signals_from_verdicts():
             {"source": "virustotal", "ioc": "http://evil.test", "malicious": 5},
             {"source": "urlscan", "ioc": "http://evil.test", "verdicts_seen": ["malicious"]},
             {"source": "virustotal", "ioc": "http://clean.test", "malicious": 1},
+            {
+                "source": "safebrowsing",
+                "ioc": "http://sb.test",
+                "malicious": 1,
+                "threat_types": ["SOCIAL_ENGINEERING"],
+            },
         ],
     }
     signals = cli._enrichment_feedback_signals({}, enrichment)
     ids = {s["id"] for s in signals}
     assert "vt_malicious_verdict" in ids
     assert "urlscan_malicious_verdict" in ids
+    assert "safebrowsing_malicious_verdict" in ids
     # a single-engine VT hit (below the >=3 threshold) must not fire
     assert sum(1 for s in signals if s["id"] == "vt_malicious_verdict") == 1

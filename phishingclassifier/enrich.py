@@ -25,6 +25,12 @@ URLSCAN_BASE = "https://urlscan.io/api/v1"
 # blocking inline.
 URLSCAN_MAX_WORKERS = 5
 
+# Google Safe Browsing Lookup API v4. A third, independent service with its
+# own quota; it accepts a batch of URLs in a single request, so we make at
+# most one call per email instead of one per IOC.
+SB_BASE = "https://safebrowsing.googleapis.com/v4/threatMatches:match"
+MAX_SB_URLS = 50
+
 # Threat intelligence goes stale: a domain that is clean today may be
 # weaponized tomorrow. Cached verdicts expire after this many seconds so a
 # returning analyst is not fed outdated signals. Override via the
@@ -33,6 +39,12 @@ DEFAULT_CACHE_TTL = 24 * 3600
 
 _CACHE_SUBDIR = "cache"
 _CACHE_FILE = "vt_cache.json"
+
+
+def _client_version() -> str:
+    import phishingclassifier
+
+    return phishingclassifier.__version__
 
 
 class EnrichmentState:
@@ -46,6 +58,7 @@ class EnrichmentState:
         self.cache_ttl = self._resolve_ttl(cache_ttl)
         self.vt_key: Optional[str] = None
         self.urlscan_key: Optional[str] = None
+        self.google_key: Optional[str] = None
         self._cache: Dict[str, Any] = {}
         self._last_vt_request = 0.0
         self._lock = threading.RLock()
@@ -55,7 +68,7 @@ class EnrichmentState:
         self.cache_expired = 0
         self.errors: List[str] = []
         self._load_keys(workdir)
-        if self.vt_key or self.urlscan_key:
+        if self.vt_key or self.urlscan_key or self.google_key:
             self._load_cache()
 
     @staticmethod
@@ -91,6 +104,8 @@ class EnrichmentState:
                         self.vt_key = value
                     elif key == "URLSCAN_API_KEY" and value:
                         self.urlscan_key = value
+                    elif key == "GOOGLE_API_KEY" and value:
+                        self.google_key = value
             except OSError:
                 pass
             break  # first existing .env wins; never stack multiple files
@@ -98,17 +113,21 @@ class EnrichmentState:
         # environment variables take precedence
         env_vt = os.environ.get("VT_API_KEY", "").strip()
         env_us = os.environ.get("URLSCAN_API_KEY", "").strip()
+        env_google = os.environ.get("GOOGLE_API_KEY", "").strip()
         if env_vt:
             self.vt_key = env_vt
         if env_us:
             self.urlscan_key = env_us
+        if env_google:
+            self.google_key = env_google
         if self.offline:
             self.vt_key = None
             self.urlscan_key = None
+            self.google_key = None
 
     @property
     def enabled(self) -> bool:
-        return bool(self.vt_key or self.urlscan_key)
+        return bool(self.vt_key or self.urlscan_key or self.google_key)
 
     def _load_cache(self) -> None:
         try:
@@ -322,6 +341,92 @@ class EnrichmentState:
             self.errors.append("urlscan invalid JSON")
             return None
 
+    def _http_post(
+        self, url: str, params: Dict[str, str], payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """POST a JSON body with query params; return parsed JSON or None."""
+        try:
+            import requests
+        except ImportError:
+            self.errors.append("requests not installed -> offline mode")
+            self.offline = True
+            return None
+        try:
+            resp = requests.post(
+                url,
+                params=params,  # type: ignore[arg-type]
+                json=payload,
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+            self.requests_made += 1
+            if resp.status_code != 200:
+                self.errors.append(f"HTTP {resp.status_code} for {url}")
+                return None
+            return resp.json()
+        except requests.RequestException as exc:
+            self.errors.append(f"network error: {type(exc).__name__}")
+            return None
+        except ValueError:
+            self.errors.append("invalid JSON response")
+            return None
+
+    def safebrowsing_lookup(self, urls: List[str]) -> List[Dict[str, Any]]:
+        """Batch-check URLs against Google Safe Browsing in one request.
+
+        Returns a summary dict per *matched* (unsafe) URL only; clean URLs are
+        cached but produce no lookup entry, mirroring urlscan's observed-
+        verdicts style. Results are cached per URL under the ``sb:`` namespace.
+        """
+        if not self.google_key or not urls:
+            return []
+        uncached: List[str] = []
+        out: List[Dict[str, Any]] = []
+        for u in urls:
+            cached = self._cached(f"sb:{u}")
+            if cached is None:
+                uncached.append(u)
+            elif cached.get("malicious"):
+                out.append(cached)
+        if not uncached:
+            return out
+        payload = {
+            "client": {"clientId": "phishsleuth", "clientVersion": _client_version()},
+            "threatInfo": {
+                "threatTypes": [
+                    "MALICIOUS_SOFTWARE",
+                    "SOCIAL_ENGINEERING",
+                    "UNWANTED_SOFTWARE",
+                    "POTENTIALLY_UNWANTED",
+                ],
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [{"url": u} for u in uncached],
+            },
+        }
+        data = self._http_post(SB_BASE, {"key": self.google_key}, payload)
+        if data is None:
+            return out
+        matches: Dict[str, List[str]] = {}
+        for m in data.get("matches", []) or []:
+            threat = m.get("threat") or {}
+            turl = threat.get("url") or (m.get("threatEntry") or {}).get("url")
+            tt = m.get("threatType")
+            if turl and tt:
+                matches.setdefault(turl, []).append(tt)
+        for u in uncached:
+            types = matches.get(u)
+            summary = {
+                "source": "safebrowsing",
+                "type": "url",
+                "ioc": u,
+                "malicious": 1 if types else 0,
+                "threat_types": sorted(set(types)) if types else [],
+            }
+            self._put_cache(f"sb:{u}", summary)
+            if types:
+                out.append(summary)
+        return out
+
 
 def enrich_result(
     result: Dict[str, Any], state: EnrichmentState, max_lookups: int = 20
@@ -406,6 +511,15 @@ def enrich_result(
             enrichment["lookups"].append({"ioc": payload.get("filename", ""), **summary})
         else:
             enrichment["lookups"].append({"ioc": payload, **summary})
+
+    # Google Safe Browsing: a single batched check of this email's URLs. A
+    # separate service/quota from VT and urlscan, so it runs once here rather
+    # than occupying per-IOC budget slots in the plan above.
+    if state.google_key:
+        sb_urls = iocs.get("urls", {}).get("header", []) + iocs.get("urls", {}).get("body", [])
+        sb_urls = list(dict.fromkeys(u for u in sb_urls if u))[:MAX_SB_URLS]
+        if sb_urls:
+            enrichment["lookups"].extend(state.safebrowsing_lookup(sb_urls))
 
     enrichment["errors"].extend(state.errors[-5:])
     return enrichment

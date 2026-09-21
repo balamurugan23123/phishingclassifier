@@ -215,6 +215,100 @@ def test_enrichment_never_raises(monkeypatch):
     assert any("RuntimeError" in e for e in block["errors"])
 
 
+def _sb_state(tmp_path, monkeypatch):
+    """EnrichmentState with only a Google key, isolated from any real .env."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VT_API_KEY", raising=False)
+    monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy-sb")
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    return EnrichmentState(workdir=str(tmp_path))
+
+
+def test_safebrowsing_flags_matched_urls(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+    assert state.google_key == "dummy-sb"
+    captured = {}
+
+    def fake_post(url, params, payload):
+        captured["url"] = url
+        captured["params"] = params
+        captured["payload"] = payload
+        return {
+            "matches": [{"threat": {"url": "http://bad.test/"}, "threatType": "SOCIAL_ENGINEERING"}]
+        }
+
+    monkeypatch.setattr(state, "_http_post", fake_post)
+    out = state.safebrowsing_lookup(["http://bad.test/", "http://good.test/"])
+
+    assert captured["url"].startswith("https://safebrowsing.googleapis.com")
+    assert captured["params"] == {"key": "dummy-sb"}
+    # only the matched (unsafe) URL is returned as a lookup
+    assert [lk["ioc"] for lk in out] == ["http://bad.test/"]
+    assert out[0]["source"] == "safebrowsing"
+    assert out[0]["malicious"] == 1
+    assert out[0]["threat_types"] == ["SOCIAL_ENGINEERING"]
+    # the clean URL is still cached so it won't be re-queried
+    assert state._cached("sb:http://good.test/")["malicious"] == 0
+
+
+def test_safebrowsing_uses_cache(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+    calls = {"n": 0}
+
+    def fake_post(url, params, payload):
+        calls["n"] += 1
+        return {"matches": []}
+
+    monkeypatch.setattr(state, "_http_post", fake_post)
+    assert state.safebrowsing_lookup(["http://clean.test/"]) == []
+    assert calls["n"] == 1
+    # second lookup is served from cache -> no extra request
+    assert state.safebrowsing_lookup(["http://clean.test/"]) == []
+    assert calls["n"] == 1
+
+
+def test_safebrowsing_disabled_without_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("VT_API_KEY", raising=False)
+    monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    state = EnrichmentState(workdir=str(tmp_path))
+    assert state.google_key is None
+    assert state.safebrowsing_lookup(["http://x.test/"]) == []
+
+
+def test_enrich_result_runs_safebrowsing_batch(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+
+    def fake_sb(urls):
+        return [
+            {
+                "source": "safebrowsing",
+                "type": "url",
+                "ioc": u,
+                "malicious": 1,
+                "threat_types": ["MALICIOUS_SOFTWARE"],
+            }
+            for u in urls
+        ]
+
+    monkeypatch.setattr(state, "safebrowsing_lookup", fake_sb)
+    result = {
+        "origin_ip": None,
+        "iocs": {
+            "domains": {"header": [], "body": []},
+            "urls": {"header": ["http://x.test/"], "body": ["http://y.test/"]},
+            "attachment_hashes": [],
+        },
+    }
+    block = enrich_result(result, state)
+    assert block["mode"] == "live"
+    checked = {lk["ioc"] for lk in block["lookups"] if lk["source"] == "safebrowsing"}
+    assert checked == {"http://x.test/", "http://y.test/"}
+
+
 def test_html_summary_has_no_remote_resources_and_escapes():
     results = []
     for name in ("clean.eml", "spoofed.eml", "harvester.eml"):
