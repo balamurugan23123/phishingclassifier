@@ -258,6 +258,13 @@ def _analyze_bytes(raw: bytes, source: str) -> dict:
     return result
 
 
+# Streamlit re-executes this whole script (every tab body included) on any
+# widget interaction. Caching the pure analysis/loading work by input means a
+# slider tweak in one tab does not re-parse and re-score emails elsewhere.
+_analyze_bytes = st.cache_data(_analyze_bytes, show_spinner="Analyzing\u2026")
+_load_results = st.cache_data(_load_results)
+
+
 def _ioc_lines(result: dict) -> list:
     lines = []
     if result.get("origin_ip"):
@@ -302,8 +309,29 @@ def _auth_line(result: dict) -> str:
     )
 
 
-def _render_cases(results: list) -> None:
-    """Render distribution bar and case cards."""
+def _export_block(results: list, export_key: str) -> None:
+    """Offer the analyzed results for download (JSON always, Markdown when
+    a single email). Nothing leaves the page unless the analyst clicks."""
+    from phishingclassifier.report import batch_json, markdown_report
+
+    label = "Download results (JSON)" if len(results) != 1 \
+        else "Download this result (JSON)"
+    st.download_button(
+        label, data=batch_json(results),
+        file_name="phishing_results.json", mime="application/json",
+        key=f"dl_json_{export_key}",
+    )
+    if len(results) == 1:
+        stem = Path(results[0]["file"]).stem or "email"
+        st.download_button(
+            "Download report (Markdown)", data=markdown_report(results[0]),
+            file_name=f"{stem}.md", mime="text/markdown",
+            key=f"dl_md_{export_key}",
+        )
+
+
+def _render_cases(results: list, export_key: str = "view") -> None:
+    """Render distribution bar, export control, and case cards."""
     if not results:
         st.info("No results to show.")
         return
@@ -311,6 +339,7 @@ def _render_cases(results: list) -> None:
     for r in results:
         counts[r["score"]["verdict"]] = counts.get(r["score"]["verdict"], 0) + 1
     st.markdown(_distro_html(counts, len(results)), unsafe_allow_html=True)
+    _export_block(results, export_key)
 
     for r in results:
         score = r["score"]
@@ -570,7 +599,7 @@ full per-corpus breakdown and known blind spots.</div>
         if demo_results:
             st.caption(" · ".join(
                 f"`{n}` {d}" for n, d in DEMO_EMAILS.items()))
-            _render_cases(demo_results)
+            _render_cases(demo_results, export_key="demo")
 
     with tab_paste:
         st.markdown(
@@ -594,7 +623,7 @@ full per-corpus breakdown and known blind spots.</div>
             else:
                 _render_cases([_analyze_bytes(
                     pasted.encode("utf-8", errors="replace"),
-                    source="(pasted email)")])
+                    source="(pasted email)")], export_key="paste")
 
     with tab_upload:
         st.markdown(
@@ -612,7 +641,7 @@ full per-corpus breakdown and known blind spots.</div>
             _render_cases([
                 _analyze_bytes(up.getvalue(), source=up.name)
                 for up in uploads
-            ])
+            ], export_key="upload")
 
     with tab_batch:
         st.markdown(
@@ -665,7 +694,7 @@ full per-corpus breakdown and known blind spots.</div>
 
             kept = [r for r in batch_results if _keep(r)]
             st.caption(f"Showing {len(kept)} of {len(batch_results)} email(s)")
-            _render_cases(kept)
+            _render_cases(kept, export_key="batch")
 
 
 if __name__ == "__main__":
