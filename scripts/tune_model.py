@@ -26,14 +26,16 @@ This script does all three and is safe to leave running unattended:
   ``threshold``, which those functions now honour.
 
 Hardware note: HistGradientBoosting is a CPU (OpenMP) learner -- the GPU
-is unused here. On a 14c/20t chip set ``OMP_NUM_THREADS`` to ~4 and
-``--jobs`` stays 1; the search is embarrassingly serial by design so a
-single machine maxes out cleanly.
+is unused here. The search loop is SERIAL (no sklearn n_jobs fan-out), so
+let one HistGradientBoosting fit span every logical core: on a 14c/20t chip
+set ``OMP_NUM_THREADS`` to ~18. Setting it low (e.g. 4) leaves most cores
+idle and makes each config several times slower. Individual configs vary
+widely in cost -- the slowest are the high ``max_iter`` x big-leaf draws.
 
 Usage (see README "Training the model"):
 
     $env:PYTHONPATH = (Get-Location).Path
-    $env:OMP_NUM_THREADS = "4"
+    $env:OMP_NUM_THREADS = "18"
     py -3 scripts/tune_model.py --per-class 15000 --max-seconds 21600
 """
 
