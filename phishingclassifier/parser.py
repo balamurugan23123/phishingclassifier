@@ -7,7 +7,6 @@ import email.policy
 import email.utils
 import hashlib
 import re
-from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
 from .utils import extract_ip, is_internal_ip

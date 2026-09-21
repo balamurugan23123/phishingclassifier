@@ -6,9 +6,7 @@ from phishingclassifier.csv_adapter import (
     load_csv_dataset, row_label, row_to_parsed,
 )
 from phishingclassifier.heuristics import _shannon_entropy, analyze_signals
-from phishingclassifier.iocs import extract_iocs
 from phishingclassifier.report import build_result
-from phishingclassifier.scoring import verdict_for
 
 SAMPLES = Path(__file__).parent / ".." / "samples"
 

@@ -234,7 +234,6 @@ def _check_envelope_spoof(parsed: ParsedEmail, signals: List[Dict[str, Any]]) ->
             # local part looks institutional/role-based — 'we will reply
             # from a different personal mailbox' is not a normal pattern.
             rt_local = parsed.reply_to.rsplit("@", 1)[0].lower()
-            from_local = (parsed.from_addr or "").rsplit("@", 1)[0].lower()
             norm_rt = normalize_confusables(rt_local)
             institutional = any(
                 kw in norm_rt for kw in INSTITUTION_KEYWORDS + list(BRANDS)

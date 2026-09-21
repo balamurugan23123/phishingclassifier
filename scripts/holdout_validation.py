@@ -16,9 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from phishingclassifier.csv_adapter import (
-    iter_csv_rows, load_combined_dataset, row_label, row_to_parsed,
+    iter_csv_rows, row_label, row_to_parsed,
 )
-from phishingclassifier.ml import evaluate_on_datasets, train_from_rows
+from phishingclassifier.ml import train_from_rows
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 SOURCES = [
@@ -59,8 +59,6 @@ def main() -> None:
         print(f"\n=== holdout: {held_out} " + "=" * 40)
         exclude = {held_out, "phishing_email.csv", "labeled_sample.csv"}
         files = [n for n in SOURCES if n not in exclude]
-        # train on remaining sources (balanced sample)
-        train_files = [str(SAMPLES / n) for n in files]
         # build combined training rows manually: load each, cap per class
         phish, legit = [], []
         for n in files:
