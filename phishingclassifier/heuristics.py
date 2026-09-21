@@ -321,6 +321,25 @@ CORRELATION_BONUS = 15
 ENTROPY_THRESHOLD = 3.5
 MIN_DOMAIN_LEN_FOR_ENTROPY = 10
 
+# Mailer / client User-Agent strings that are rare in genuine user mail but
+# common in scripted phishing and bulk-mail infrastructure. Matched as
+# case-insensitive substrings against the X-Mailer and User-Agent headers.
+# A real desktop/webmail client never identifies itself as an HTTP library.
+SUSPICIOUS_MAILERS = [
+    "python-requests",
+    "python-urllib",
+    "smtplib",
+    "curl/",
+    "wget/",
+    "go-http-client",
+    "httpclient",
+    "java/",
+    "bulk e-mail",
+    "bulkmailer",
+    "mass mailer",
+    "email bomber",
+]
+
 
 def _signal(sid: str, weight: int, reason: str, evidence: str) -> Dict[str, Any]:
     return {"id": sid, "weight": weight, "reason": reason, "evidence": evidence}
@@ -420,6 +439,31 @@ def _check_display_name(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> N
                     )
                 )
             break
+
+
+def _check_mailer(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Flag X-Mailer / User-Agent strings that betray scripted or bulk senders.
+
+    Only fires on a *present*, incriminating header value, so it is safe to run
+    on CSV corpora (which rarely carry these headers) -- absence is never
+    penalised, since plenty of legitimate MTAs omit a mailer tag.
+    """
+    for header in ("x-mailer", "user-agent"):
+        value = parsed.headers.get(header, "")
+        if not value:
+            continue
+        low = value.lower()
+        for token in SUSPICIOUS_MAILERS:
+            if token in low:
+                signals.append(
+                    _signal(
+                        "suspicious_mailer",
+                        W_LOW,
+                        f"{header} value {value!r} indicates scripted or bulk sending",
+                        f"{header}: {value}",
+                    )
+                )
+                break
 
 
 def _check_message_id_date(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -948,6 +992,7 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
     _check_attachments(parsed, signals)
     _check_urgency(parsed, signals)
     _check_base64_blobs(parsed, signals)
+    _check_mailer(parsed, signals)
 
     # deduplicate identical signals
     seen: set = set()

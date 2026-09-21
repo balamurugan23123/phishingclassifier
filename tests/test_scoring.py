@@ -1,8 +1,9 @@
 """Heuristic scoring tests."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
-from phishingclassifier.heuristics import analyze_signals, _haystack
+from phishingclassifier.heuristics import _check_mailer, _haystack, analyze_signals
 from phishingclassifier.parser import parse_eml
 from phishingclassifier.report import batch_json, build_result, markdown_report
 from phishingclassifier.scoring import score_result, verdict_for
@@ -126,3 +127,35 @@ def test_haystack_is_memoized_and_invalidates_on_change():
     second = _haystack(parsed)
     assert second is not first
     assert "totally different subject" in second
+
+
+def _mailer_signals(headers):
+    signals = []
+    _check_mailer(SimpleNamespace(headers=headers), signals)
+    return signals
+
+
+def test_mailer_flags_scripted_user_agent():
+    s = _mailer_signals({"user-agent": "python-requests/2.31.0"})
+    assert [x["id"] for x in s] == ["suspicious_mailer"]
+
+
+def test_mailer_flags_bulk_xmailer():
+    s = _mailer_signals({"x-mailer": "Mass Mailer Pro 3.0"})
+    assert s and s[0]["id"] == "suspicious_mailer"
+
+
+def test_mailer_ignores_normal_clients():
+    assert (
+        _mailer_signals(
+            {
+                "x-mailer": "Microsoft Outlook 16",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            }
+        )
+        == []
+    )
+
+
+def test_mailer_absent_header_is_not_flagged():
+    assert _mailer_signals({}) == []
