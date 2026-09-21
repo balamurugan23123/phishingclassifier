@@ -550,6 +550,62 @@ def _check_origin_ip(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None
         )
 
 
+def _check_received_chain(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Analyse the Received chain offline.
+
+    Two low-noise signals: a completely absent chain (mail that never crossed a
+    relay -- hand-crafted or stripped), and non-monotonic hop timestamps (a
+    delivery hop timestamped more than a day *before* an upstream one is
+    physically impossible and indicates forged/backdated headers). A generous
+    24h tolerance absorbs normal inter-server clock skew. ASN / geo-IP lookup
+    would need live whois/DNS and is deliberately left to the opt-in
+    enrichment layer, so the default path stays offline.
+    """
+    hops = parsed.received_chain
+    if not hops:
+        signals.append(
+            _signal(
+                "received_chain_absent",
+                W_LOW,
+                "No Received headers: the message did not traverse any mail relay",
+                "Received: (absent)",
+            )
+        )
+        return
+
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+
+    times: List[Any] = []
+    for hop in hops:
+        # Received value is "<hops>; <date>" -- the timestamp follows the last ';'.
+        tail = hop.rsplit(";", 1)[-1]
+        try:
+            dt = parsedate_to_datetime(tail)
+        except (TypeError, ValueError, IndexError):
+            dt = None
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        times.append(dt)
+
+    # hops[0] is the delivery (newest) hop, hops[-1] the origin. A downstream hop
+    # must never be timestamped materially before an upstream one.
+    for newer, older in zip(times, times[1:]):
+        if newer is None or older is None:
+            continue
+        if (older - newer).total_seconds() > 86400:
+            signals.append(
+                _signal(
+                    "received_timestamp_backdated",
+                    W_LOW,
+                    "A downstream Received hop is timestamped over a day before an upstream one",
+                    "Received chain timestamps are non-monotonic (possible header forgery)",
+                )
+            )
+            break
+
+
 def _url_host(url: str) -> str:
     try:
         return (urlparse(url).hostname or "").lower()
@@ -1005,6 +1061,7 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
         _check_message_id_date(parsed, signals)
         _check_origin_ip(parsed, signals)
         _check_reply_chain(parsed, signals)
+        _check_received_chain(parsed, signals)
     _check_urls(parsed, iocs, signals)
     _check_link_text_mismatch(parsed, signals)
     _check_domain_entropy(parsed, iocs, signals)

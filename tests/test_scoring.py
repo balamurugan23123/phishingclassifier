@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from phishingclassifier.heuristics import (
     _check_mailer,
+    _check_received_chain,
     _check_reply_chain,
     _haystack,
     analyze_signals,
@@ -184,3 +185,35 @@ def test_reply_chain_allows_genuine_reply():
 
 def test_reply_chain_ignores_non_reply_subject():
     assert _reply_signals("Your weekly summary", {}) == []
+
+
+def _received_signals(hops):
+    signals = []
+    _check_received_chain(SimpleNamespace(received_chain=hops), signals)
+    return signals
+
+
+def test_received_absent_chain_flagged():
+    s = _received_signals([])
+    assert [x["id"] for x in s] == ["received_chain_absent"]
+
+
+def test_received_monotonic_chain_is_clean():
+    hops = [
+        "from mta1 (x) by dest.example.com; Fri, 05 Jan 2024 12:00:00 +0000",
+        "from origin (y) by relay.example.com; Fri, 05 Jan 2024 11:00:00 +0000",
+    ]
+    assert _received_signals(hops) == []
+
+
+def test_received_backdated_chain_flagged():
+    hops = [
+        "from mta1 by dest.example.com; Mon, 01 Jan 2024 00:00:00 +0000",
+        "from origin by relay.example.com; Fri, 05 Jan 2024 00:00:00 +0000",
+    ]
+    s = _received_signals(hops)
+    assert [x["id"] for x in s] == ["received_timestamp_backdated"]
+
+
+def test_received_unparseable_dates_are_ignored():
+    assert _received_signals(["from a by b; nope", "from c by d; also nope"]) == []
