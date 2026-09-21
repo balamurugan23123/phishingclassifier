@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List
 
 from .enrich import EnrichmentState, enrich_result
+from .export import misp_events, stix_bundle
 from .heuristics import analyze_signals
 from .parser import parse_eml
 from .report import batch_json, build_result, write_html, write_markdown
@@ -80,6 +81,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument(
         "--html", dest="html_out", metavar="PATH", help="Write batch HTML summary to this path"
+    )
+    analyze.add_argument(
+        "--stix",
+        dest="stix_out",
+        metavar="PATH",
+        help="Write a STIX 2.1 observable bundle of extracted IOCs to this path",
+    )
+    analyze.add_argument(
+        "--misp",
+        dest="misp_out",
+        metavar="PATH",
+        help="Write MISP events (one per email) of extracted IOCs to this path",
     )
 
     stats = sub.add_parser("stats", help="Detection stats vs labeled folders")
@@ -244,6 +257,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     if args.html_out:
         print(f"[+] HTML: {write_html(results, args.html_out)}")
+
+    if args.stix_out:
+        Path(args.stix_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.stix_out).write_text(stix_bundle(results), encoding="utf-8")
+        print(f"[+] STIX bundle: {args.stix_out}")
+
+    if args.misp_out:
+        Path(args.misp_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.misp_out).write_text(misp_events(results), encoding="utf-8")
+        print(f"[+] MISP events: {args.misp_out}")
 
     if md_written:
         print(f"[+] Markdown reports: {args.md_dir} ({len(md_written)} files)")
