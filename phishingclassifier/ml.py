@@ -431,6 +431,7 @@ def evaluate_on_datasets(paths: List[str], max_rows_per_source: int = 0) -> Dict
         raise RuntimeError("No trained model on disk — train first.")
     vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
     scaler = bundle.get("scaler")
+    threshold = float(bundle.get("threshold", 0.5))
 
     from .csv_adapter import load_csv_dataset
     from .heuristics import analyze_signals
@@ -458,7 +459,7 @@ def evaluate_on_datasets(paths: List[str], max_rows_per_source: int = 0) -> Dict
             idx = classes.index(1) if 1 in classes else 1
             p_phish = float(proba[idx])
             y.append(r["label"])
-            p.append(1 if p_phish >= 0.5 else 0)
+            p.append(1 if p_phish >= threshold else 0)
         per_source[Path(path).name] = {"rows": len(y), **classification_metrics(y, p)}
         all_y.extend(y)
         all_p.extend(p)
@@ -494,8 +495,9 @@ def classify(
     classes = list(getattr(clf, "classes_", [0, 1]))
     idx = classes.index(1) if 1 in classes else 1
     p_phish = float(proba[idx])
+    threshold = float(bundle.get("threshold", 0.5))
     return {
         "probability_phishing": round(p_phish, 4),
-        "prediction": 1 if p_phish >= 0.5 else 0,
+        "prediction": 1 if p_phish >= threshold else 0,
         "model": bundle.get("kind", "ml"),
     }
