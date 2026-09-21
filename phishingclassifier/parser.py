@@ -170,6 +170,34 @@ def parse_eml(path: str) -> ParsedEmail:
     return parsed
 
 
+def iter_attachment_bytes(path: str):
+    """Yield ``(filename, decoded_payload_bytes)`` for each attachment part.
+
+    Used only by the opt-in deep attachment scan: the normal pipeline drops
+    payload bytes for opsec/performance reasons, so this deliberately re-reads
+    the file. Malformed parts are skipped silently.
+    """
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        msg = email.message_from_bytes(raw, policy=email.policy.compat32)
+    except Exception:
+        return
+    for part in msg.walk():
+        try:
+            if part.is_multipart():
+                continue
+            filename = part.get_filename()
+            disposition = str(part.get("Content-Disposition", "") or "")
+            if not filename and "attachment" not in disposition.lower():
+                continue
+            payload = part.get_payload(decode=True)
+        except Exception:
+            continue
+        if isinstance(payload, (bytes, bytearray)):
+            yield (filename or "(unnamed)"), bytes(payload)
+
+
 def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
     for part in msg.walk():
         try:

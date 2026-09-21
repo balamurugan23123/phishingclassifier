@@ -21,6 +21,9 @@ phishsleuth = "phishingclassifier.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pip-audit>=2.7"]
+# Opt-in depth for `analyze --deep-attachments`: legacy OLE2 macro extraction.
+# The baseline (OOXML/ZIP macro detection) needs nothing beyond the stdlib.
+attachments = ["oletools>=0.60"]
 
 # Single source of truth for runtime deps: the pins in requirements.txt are
 # read directly, so pyproject and the deployment file can never drift.

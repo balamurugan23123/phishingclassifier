@@ -94,6 +94,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write MISP events (one per email) of extracted IOCs to this path",
     )
+    analyze.add_argument(
+        "--deep-attachments",
+        action="store_true",
+        help="Open Office attachments and flag embedded VBA macros (slower; "
+        "install optional 'oletools' for legacy .doc/.xls depth)",
+    )
 
     stats = sub.add_parser("stats", help="Detection stats vs labeled folders")
     stats.add_argument("phish_dir", help="Folder of known-phish .eml files")
@@ -238,6 +244,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         except Exception as exc:
             logger.warning("failed %s: %s", path.name, exc)
             continue
+        if args.deep_attachments:
+            from .attachments import analyze_eml
+            from .scoring import score_result
+
+            att_extra = analyze_eml(str(path))
+            if att_extra:
+                result["signals"] = result["signals"] + att_extra
+                result["score"] = score_result(result["signals"])
         result["enrichment"] = enrich_result(result, state)
         if result["enrichment"].get("mode") == "live":
             from .scoring import score_result
