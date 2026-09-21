@@ -113,10 +113,12 @@ def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
     if not host:
         return None
     host_l = host.lower().rstrip(".")
-    # genuine brand domain -> never a lookalike
+    # genuine brand domain (or a subdomain of one) -> never a lookalike
     for legit in brands.values():
-        if host_l in [d.lower() for d in legit]:
-            return None
+        for d in legit:
+            dl = d.lower()
+            if host_l == dl or host_l.endswith("." + dl):
+                return None
     generic = {"www", "mail", "login", "secure", "verify", "account",
               "accounts", "portal", "auth", "id", "support", "signin",
               "email", "webmail", "smtp", "imap", "mx"}
