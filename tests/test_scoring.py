@@ -3,7 +3,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from phishingclassifier.heuristics import _check_mailer, _haystack, analyze_signals
+from phishingclassifier.heuristics import (
+    _check_mailer,
+    _check_reply_chain,
+    _haystack,
+    analyze_signals,
+)
 from phishingclassifier.parser import parse_eml
 from phishingclassifier.report import batch_json, build_result, markdown_report
 from phishingclassifier.scoring import score_result, verdict_for
@@ -159,3 +164,23 @@ def test_mailer_ignores_normal_clients():
 
 def test_mailer_absent_header_is_not_flagged():
     assert _mailer_signals({}) == []
+
+
+def _reply_signals(subject, headers):
+    signals = []
+    _check_reply_chain(SimpleNamespace(subject=subject, headers=headers), signals)
+    return signals
+
+
+def test_reply_chain_flags_fabricated_thread():
+    s = _reply_signals("Re: your invoice", {})
+    assert [x["id"] for x in s] == ["fake_reply_thread"]
+
+
+def test_reply_chain_allows_genuine_reply():
+    assert _reply_signals("Re: your invoice", {"in-reply-to": "<a@x.com>"}) == []
+    assert _reply_signals("Re: your invoice", {"references": "<a@x.com>"}) == []
+
+
+def test_reply_chain_ignores_non_reply_subject():
+    assert _reply_signals("Your weekly summary", {}) == []

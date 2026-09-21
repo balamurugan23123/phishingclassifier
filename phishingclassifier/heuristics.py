@@ -340,6 +340,11 @@ SUSPICIOUS_MAILERS = [
     "email bomber",
 ]
 
+# Subject prefixes that claim "this is a reply". Real mail clients always add
+# In-Reply-To/References when replying, so a reply-prefixed subject with no
+# threading headers is a fabricated thread (reply-chain hijack / BEC).
+REPLY_SUBJECT_PREFIXES = ("re:", "aw:", "resp:", "rv:", "reply:")
+
 
 def _signal(sid: str, weight: int, reason: str, evidence: str) -> Dict[str, Any]:
     return {"id": sid, "weight": weight, "reason": reason, "evidence": evidence}
@@ -439,6 +444,28 @@ def _check_display_name(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> N
                     )
                 )
             break
+
+
+def _check_reply_chain(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Detect a fabricated reply thread (reply-chain hijack / BEC).
+
+    A genuine reply carries In-Reply-To and/or References. When the subject
+    claims to be a reply but neither header is present, the "thread" is
+    invented to pressure the recipient into trusting a fake conversation.
+    """
+    subject = (parsed.subject or "").lstrip().lower()
+    if not subject.startswith(REPLY_SUBJECT_PREFIXES):
+        return
+    has_threading = bool(parsed.headers.get("in-reply-to") or parsed.headers.get("references"))
+    if not has_threading:
+        signals.append(
+            _signal(
+                "fake_reply_thread",
+                W_MED,
+                "Subject claims to be a reply but no In-Reply-To/References header backs it",
+                f"Subject: {parsed.subject!r} (threading headers absent)",
+            )
+        )
 
 
 def _check_mailer(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -977,6 +1004,7 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
         _check_display_name(parsed, signals)
         _check_message_id_date(parsed, signals)
         _check_origin_ip(parsed, signals)
+        _check_reply_chain(parsed, signals)
     _check_urls(parsed, iocs, signals)
     _check_link_text_mismatch(parsed, signals)
     _check_domain_entropy(parsed, iocs, signals)
