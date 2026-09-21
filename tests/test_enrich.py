@@ -156,6 +156,43 @@ def test_urlscan_search_mode_only(monkeypatch, tmp_path):
     assert not any("/scan/" in u for u in called_urls)
 
 
+def test_enrich_result_overlaps_urlscan_with_vt_and_preserves_order(monkeypatch, tmp_path):
+    monkeypatch.setenv("VT_API_KEY", "dummy")
+    monkeypatch.setenv("URLSCAN_API_KEY", "dummy")
+    monkeypatch.chdir(tmp_path)
+    state = EnrichmentState(workdir=str(tmp_path))
+
+    # No real network: replace the lookups with fast fakes. urlscan_search
+    # runs on the thread pool while VT stays on the main thread; this asserts
+    # the concurrent path yields the exact same ordered output as sequential.
+    def fake_vt_ip(ip):
+        return {"source": "virustotal", "type": "ip", "malicious": 1}
+
+    def fake_vt_domain(d):
+        return {"source": "virustotal", "type": "domain", "malicious": 2}
+
+    def fake_urlscan(d):
+        return {"source": "urlscan", "type": "domain_search",
+                "total_existing_scans": 7, "verdicts_seen": ["malicious"]}
+
+    monkeypatch.setattr(state, "vt_ip", fake_vt_ip)
+    monkeypatch.setattr(state, "vt_domain", fake_vt_domain)
+    monkeypatch.setattr(state, "urlscan_search", fake_urlscan)
+
+    result = {
+        "origin_ip": None,
+        "iocs": {"domains": {"header": ["a.test", "b.test"], "body": []},
+                 "attachment_hashes": []},
+    }
+    block = enrich_result(result, state, max_lookups=20)
+    assert block["mode"] == "live"
+    # each domain yields a VT result then its urlscan result, in order
+    assert [ (lk["ioc"], lk["source"]) for lk in block["lookups"] ] == [
+        ("a.test", "virustotal"), ("a.test", "urlscan"),
+        ("b.test", "virustotal"), ("b.test", "urlscan"),
+    ]
+
+
 def test_enrichment_never_raises(monkeypatch):
     state = EnrichmentState()
     state.vt_key = "dummy"

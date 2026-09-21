@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +16,11 @@ READ_TIMEOUT = 15.0
 VT_BASE = "https://www.virustotal.com/api/v3"
 VT_MIN_INTERVAL = 15.5
 URLSCAN_BASE = "https://urlscan.io/api/v1"
+# urlscan.io is a separate service from VirusTotal, so its lookups are not
+# bound by VT's 4-requests-per-minute budget. We run them on a small bounded
+# pool so their network I/O overlaps VT's mandatory cooldown instead of
+# blocking inline.
+URLSCAN_MAX_WORKERS = 5
 
 # Threat intelligence goes stale: a domain that is clean today may be
 # weaponized tomorrow. Cached verdicts expire after this many seconds so a
@@ -37,6 +44,7 @@ class EnrichmentState:
         self.urlscan_key: Optional[str] = None
         self._cache: Dict[str, Any] = {}
         self._last_vt_request = 0.0
+        self._lock = threading.RLock()
         self.requests_made = 0
         self.cache_hits = 0
         self.cache_misses = 0
@@ -134,7 +142,7 @@ class EnrichmentState:
         return bool(dropped)
 
     def _save_cache(self) -> None:
-        """Atomic write to cache file."""
+        """Atomic write to cache file (caller holds the lock or init)."""
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(
@@ -154,22 +162,24 @@ class EnrichmentState:
             self.errors.append(f"cache write failed: {exc}")
 
     def _cached(self, key: str) -> Optional[Dict[str, Any]]:
-        entry = self._cache.get(key)
-        if entry is None:
-            self.cache_misses += 1
-            return None
-        if self._is_stale(entry):
-            self._cache.pop(key, None)
-            self.cache_expired += 1
-            self._save_cache()
-            self.cache_misses += 1
-            return None
-        self.cache_hits += 1
-        return entry["value"]
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                self.cache_misses += 1
+                return None
+            if self._is_stale(entry):
+                self._cache.pop(key, None)
+                self.cache_expired += 1
+                self._save_cache()
+                self.cache_misses += 1
+                return None
+            self.cache_hits += 1
+            return entry["value"]
 
     def _put_cache(self, key: str, value: Dict[str, Any]) -> None:
-        self._cache[key] = {"at": time.time(), "value": value}
-        self._save_cache()
+        with self._lock:
+            self._cache[key] = {"at": time.time(), "value": value}
+            self._save_cache()
 
     def _http_get(self, url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """GET request with timeouts and rate-limit backoff."""
@@ -318,44 +328,80 @@ def enrich_result(result: Dict[str, Any], state: EnrichmentState,
         return enrichment
 
     enrichment["mode"] = "live"
+
+    # Phase 1: plan the exact set of lookups (identical budget accounting to
+    # the original sequential code) so behavior is unchanged; only the
+    # *timing* differs. Each slot is (kind, payload).
+    plan: List[tuple] = []
     budget = max_lookups
+    origin_ip = result.get("origin_ip")
+    if origin_ip and budget > 0:
+        plan.append(("vt_ip", origin_ip))
+        budget -= 1
+
+    iocs = result.get("iocs") or {}
+    domains = (iocs.get("domains", {}).get("header", [])
+               + iocs.get("domains", {}).get("body", []))
+    for domain in dict.fromkeys(domains):
+        if budget <= 0:
+            break
+        plan.append(("vt_domain", domain))
+        budget -= 1
+        if state.urlscan_key and budget > 0:
+            plan.append(("urlscan", domain))
+            budget -= 1
+
+    for att in iocs.get("attachment_hashes", []):
+        if budget <= 0:
+            break
+        plan.append(("vt_hash", att))
+        budget -= 1
+
+    # Phase 2: execute. VirusTotal is rate-limited to ~4 req/min, so its
+    # lookups stay sequential on this thread. urlscan.io is a separate
+    # service, so we fire all its searches on a small pool first; their
+    # network I/O overlaps the VT cooldown instead of blocking inline.
+    slot_result: Dict[int, Optional[Dict[str, Any]]] = {}
+    futures: Dict[int, Future] = {}
+    pool: Optional[ThreadPoolExecutor] = None
     try:
-        origin_ip = result.get("origin_ip")
-        if origin_ip and budget > 0:
-            summary = state.vt_ip(origin_ip)
-            if summary:
-                enrichment["lookups"].append(
-                    {"ioc": origin_ip, **summary}
-                )
-            budget -= 1
+        urlscan_slots = [i for i, (k, _) in enumerate(plan) if k == "urlscan"]
+        if urlscan_slots:
+            pool = ThreadPoolExecutor(max_workers=URLSCAN_MAX_WORKERS)
+            for i in urlscan_slots:
+                futures[i] = pool.submit(state.urlscan_search, plan[i][1])
 
-        iocs = result.get("iocs") or {}
-        domains = (iocs.get("domains", {}).get("header", [])
-                   + iocs.get("domains", {}).get("body", []))
-        for domain in dict.fromkeys(domains):
-            if budget <= 0:
-                break
-            summary = state.vt_domain(domain)
-            if summary:
-                enrichment["lookups"].append({"ioc": domain, **summary})
-            budget -= 1
-            if state.urlscan_key and budget > 0:
-                us = state.urlscan_search(domain)
-                if us:
-                    enrichment["lookups"].append({"ioc": domain, **us})
-                budget -= 1
+        for i, (kind, payload) in enumerate(plan):
+            if kind == "vt_ip":
+                slot_result[i] = state.vt_ip(payload)
+            elif kind == "vt_domain":
+                slot_result[i] = state.vt_domain(payload)
+            elif kind == "vt_hash":
+                slot_result[i] = state.vt_file_hash(payload.get("sha256", ""))
 
-        for att in iocs.get("attachment_hashes", []):
-            if budget <= 0:
-                break
-            summary = state.vt_file_hash(att.get("sha256", ""))
-            if summary:
-                enrichment["lookups"].append(
-                    {"ioc": att.get("filename", ""), **summary}
-                )
-            budget -= 1
+        for i, fut in futures.items():
+            try:
+                slot_result[i] = fut.result()
+            except Exception as exc:
+                state.errors.append(
+                    f"urlscan lookup failed: {type(exc).__name__}")
+                slot_result[i] = None
     except Exception as exc:
         enrichment["errors"].append(f"enrichment failure: {type(exc).__name__}")
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False)
+
+    # Phase 3: assemble in plan order so output matches the sequential run.
+    for i, (kind, payload) in enumerate(plan):
+        summary = slot_result.get(i)
+        if not summary:
+            continue
+        if kind == "vt_hash":
+            enrichment["lookups"].append(
+                {"ioc": payload.get("filename", ""), **summary})
+        else:
+            enrichment["lookups"].append({"ioc": payload, **summary})
 
     enrichment["errors"].extend(state.errors[-5:])
     return enrichment
