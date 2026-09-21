@@ -77,6 +77,29 @@ def test_cli_validate_on_labeled_sample(capsys):
     assert "Accuracy:" in out
 
 
+def test_cli_validate_honors_custom_threshold(capsys):
+    csv_path = SAMPLES / "labeled_sample.csv"
+    if not csv_path.is_file():
+        pytest.skip("labeled_sample.csv not present")
+    rc = cli.main(["validate", str(csv_path), "--max-rows", "40", "--threshold", "30"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Threshold: score >= 30" in out
+
+
+def test_cli_rejects_out_of_range_threshold(capsys):
+    # stats: threshold below range
+    assert cli.main(["stats", str(FIXTURES), str(FIXTURES), "--threshold", "0"]) == 2
+    # validate: threshold above range
+    assert cli.main(["validate", str(SAMPLES / "labeled_sample.csv"), "--threshold", "150"]) == 2
+
+
+def test_cli_stats_honors_threshold_reflected_in_header(capsys):
+    rc = cli.main(["stats", str(FIXTURES), str(FIXTURES), "--threshold", "80"])
+    assert rc == 0
+    assert "threshold = 80" in capsys.readouterr().out
+
+
 def test_cli_stats_overlaps_folders(capsys):
     rc = cli.main(["stats", str(FIXTURES), str(FIXTURES)])
     assert rc == 0

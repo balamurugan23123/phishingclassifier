@@ -19,6 +19,16 @@ logger = logging.getLogger("phishingclassifier.cli")
 
 _LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 
+# Binary phishing decision threshold for the stats/validate commands: a score
+# at or above this counts as a positive detection. Analysts tune it to trade
+# false positives against false negatives for their environment; the default
+# 50 is the "Likely Malicious" band boundary.
+DEFAULT_THRESHOLD = 50
+
+
+def _check_threshold(value: int) -> bool:
+    return 1 <= value <= 100
+
 
 def _configure_logging(level: str) -> None:
     """Send diagnostics to stderr; keep stdout reserved for report output.
@@ -75,10 +85,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     stats = sub.add_parser("stats", help="Detection stats vs labeled folders")
     stats.add_argument("phish_dir", help="Folder of known-phish .eml files")
     stats.add_argument("ham_dir", help="Folder of benign .eml files")
+    stats.add_argument(
+        "--threshold",
+        type=int,
+        default=DEFAULT_THRESHOLD,
+        metavar="N",
+        help=f"Score at or above N counts as phishing (1-100, default {DEFAULT_THRESHOLD})",
+    )
 
     validate = sub.add_parser("validate", help="Validate heuristics against a labeled CSV dataset")
     validate.add_argument("csv_path", help="Labeled CSV file")
     validate.add_argument("--max-rows", type=int, default=0, help="Only use first N rows (0 = all)")
+    validate.add_argument(
+        "--threshold",
+        type=int,
+        default=DEFAULT_THRESHOLD,
+        metavar="N",
+        help=f"Score at or above N counts as phishing (1-100, default {DEFAULT_THRESHOLD})",
+    )
     validate.add_argument("--show-misses", action="store_true", help="Print misclassified rows")
     validate.add_argument(
         "--json", dest="json_out", metavar="PATH", help="Write validation stats JSON to this path"
@@ -227,6 +251,11 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
+    if not _check_threshold(args.threshold):
+        print("--threshold must be between 1 and 100", file=sys.stderr)
+        return 2
+    threshold = args.threshold
+
     def _score_folder(folder: str) -> List[int]:
         scores = []
         for path in _collect_eml_paths(folder):
@@ -242,12 +271,12 @@ def cmd_stats(args: argparse.Namespace) -> int:
     p_scores = _score_folder(args.phish_dir)
     h_scores = _score_folder(args.ham_dir)
 
-    tp = sum(1 for s in p_scores if s >= 50)
+    tp = sum(1 for s in p_scores if s >= threshold)
     fn = len(p_scores) - tp
-    fp = sum(1 for s in h_scores if s >= 50)
+    fp = sum(1 for s in h_scores if s >= threshold)
     tn = len(h_scores) - fp
 
-    print("\n=== Detection Performance (threshold = 50) ===")
+    print(f"\n=== Detection Performance (threshold = {threshold}) ===")
     print(f"Phish samples: {len(p_scores):>4}  |  Ham samples: {len(h_scores):>4}")
     print(f"TP: {tp:>3}   FP: {fp:>3}")
     print(f"FN: {fn:>3}   TN: {tn:>3}")
@@ -262,6 +291,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
     from .csv_adapter import load_csv_dataset
     from .scoring import verdict_for
 
+    if not _check_threshold(args.threshold):
+        print("--threshold must be between 1 and 100", file=sys.stderr)
+        return 2
+
     dataset = load_csv_dataset(args.csv_path)
     if args.max_rows and args.max_rows > 0:
         dataset = dataset[: args.max_rows]
@@ -273,7 +306,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     tp = fp = tn = fn = 0
     misses: List[dict] = []
-    threshold = 50
+    threshold = args.threshold
 
     for item in labeled:
         parsed = item["parsed"]
