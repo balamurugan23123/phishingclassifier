@@ -9,12 +9,8 @@ import hashlib
 import re
 from typing import Any, Dict, List, Optional
 
-from .utils import extract_ip, is_internal_ip
+from .utils import DANGEROUS_EXT, extract_ip, is_internal_ip
 
-_DANGEROUS_EXT = {
-    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
-    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
-}
 _ARCHIVE_EXT = {".zip", ".rar", ".7z", ".gz", ".tar"}
 
 
@@ -200,7 +196,7 @@ def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
                     "size": len(payload),
                     "sha256": digest,
                     "extension": ext,
-                    "dangerous": ext in _DANGEROUS_EXT,
+                    "dangerous": ext in DANGEROUS_EXT,
                     "archive": ext in _ARCHIVE_EXT,
                 })
                 continue

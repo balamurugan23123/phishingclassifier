@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import html
 import json
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .scoring import score_result
+from .utils import esc as _esc
 
 _VERDICT_EMOJI = {
     "Clean": "[CLEAN]",
@@ -221,10 +221,6 @@ code,.ioc{font-family:Consolas,monospace;font-size:.82rem;word-break:break-all}
 border-radius:4px;font-size:.85rem}
 details{margin:6px 0} summary{cursor:pointer;font-weight:600;font-size:.9rem}
 """
-
-
-def _esc(text: Any) -> str:
-    return html.escape(str(text), quote=True)
 
 
 def html_summary(results: List[Dict[str, Any]]) -> str:

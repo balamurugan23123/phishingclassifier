@@ -77,10 +77,8 @@ def main() -> None:
         eval_rows = load_source(held_out, cap=3000)
         # evaluate_on_datasets takes paths; reuse the featurize+predict
         # path by writing rows through the same API used by classify()
-        from phishingclassifier.ml import load_model
-        import numpy as np
+        from phishingclassifier.ml import load_model, classification_metrics
         import scipy.sparse as sp
-        from sklearn.metrics import f1_score, precision_score, recall_score
         from phishingclassifier.heuristics import analyze_signals
         from phishingclassifier.ml import _featurize, _text_for_tfidf
 
@@ -96,16 +94,10 @@ def main() -> None:
             idx = list(clf.classes_).index(1)
             y.append(r["label"])
             p.append(1 if proba[idx] >= 0.5 else 0)
-        y_arr, p_arr = np.array(y), np.array(p)
         s = {
             "eval_rows": len(y),
             "eval_label_split": f"{sum(y)}/{len(y) - sum(y)} phish/legit",
-            "accuracy": round(float((p_arr == y_arr).mean()), 4),
-            "precision": round(float(precision_score(
-                y_arr, p_arr, zero_division=0)), 4),
-            "recall": round(float(recall_score(
-                y_arr, p_arr, zero_division=0)), 4),
-            "f1": round(float(f1_score(y_arr, p_arr, zero_division=0)), 4),
+            **classification_metrics(y, p),
             "train_cv_f1": round(metrics["cv_f1_macro_mean"], 4),
         }
         report[held_out] = s

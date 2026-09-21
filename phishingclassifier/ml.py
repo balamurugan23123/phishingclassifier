@@ -306,6 +306,27 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, float]:
+    """accuracy/precision/recall/f1 for binary 0/1 labels, rounded to 4dp.
+
+    Shared by evaluate_on_datasets and the holdout script so the metric
+    definitions live in exactly one place.
+    """
+    import numpy as np
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
+    yt = np.asarray(y_true)
+    yp = np.asarray(y_pred)
+    return {
+        "accuracy": round(float((yp == yt).mean()), 4),
+        "precision": round(float(precision_score(
+            yt, yp, zero_division=0)), 4),
+        "recall": round(float(recall_score(
+            yt, yp, zero_division=0)), 4),
+        "f1": round(float(f1_score(yt, yp, zero_division=0)), 4),
+    }
+
+
 def evaluate_on_datasets(paths: List[str],
                           max_rows_per_source: int = 0) -> Dict[str, Any]:
     """Evaluate the DEPLOYED model on held-out datasets — no refitting.
@@ -315,9 +336,7 @@ def evaluate_on_datasets(paths: List[str],
     Per-source breakdown shows exactly where it fails, because a single
     aggregate number hides class/source-specific weaknesses.
     """
-    import numpy as np
     import scipy.sparse as sp
-    from sklearn.metrics import f1_score, precision_score, recall_score
 
     bundle = load_model()
     if bundle is None or not isinstance(bundle, dict):
@@ -352,30 +371,12 @@ def evaluate_on_datasets(paths: List[str],
             p_phish = float(proba[idx])
             y.append(r["label"])
             p.append(1 if p_phish >= 0.5 else 0)
-        y_arr, p_arr = np.array(y), np.array(p)
-        acc = float((p_arr == y_arr).mean())
-        per_source[Path(path).name] = {
-            "rows": len(y),
-            "accuracy": round(acc, 4),
-            "precision": round(float(precision_score(
-                y_arr, p_arr, zero_division=0)), 4),
-            "recall": round(float(recall_score(
-                y_arr, p_arr, zero_division=0)), 4),
-            "f1": round(float(f1_score(y_arr, p_arr, zero_division=0)), 4),
-        }
+        per_source[Path(path).name] = {"rows": len(y),
+                                         **classification_metrics(y, p)}
         all_y.extend(y)
         all_p.extend(p)
 
-    y_full, p_full = np.array(all_y), np.array(all_p)
-    overall = {
-        "rows": int(len(y_full)),
-        "accuracy": round(float((p_full == y_full).mean()), 4),
-        "precision": round(float(precision_score(
-            y_full, p_full, zero_division=0)), 4),
-        "recall": round(float(recall_score(
-            y_full, p_full, zero_division=0)), 4),
-        "f1": round(float(f1_score(y_full, p_full, zero_division=0)), 4),
-    }
+    overall = {"rows": int(len(all_y)), **classification_metrics(all_y, all_p)}
     return {"overall": overall, "per_source": per_source}
 
 

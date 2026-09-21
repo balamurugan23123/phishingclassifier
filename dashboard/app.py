@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import sys
 from pathlib import Path
@@ -17,6 +16,7 @@ if str(_ROOT) not in sys.path:
 import streamlit as st
 
 from phishingclassifier import observability
+from phishingclassifier.utils import esc as _esc
 
 # Error monitoring: starts only when a DSN is present (env, .env, or
 # Streamlit Cloud secrets — bridged below). Evidence-scrubbing is inside
@@ -231,11 +231,6 @@ DEMO_EMAILS = {
     "harvester.eml": "Credential form + IP-literal link + zip attachment",
     "clean.eml": "Legitimate GitHub notification (SPF/DKIM/DMARC pass)",
 }
-
-
-def _esc(value) -> str:
-    """Escape text before inserting into HTML."""
-    return html.escape(str(value or ""), quote=True)
 
 
 def _load_results(path: str) -> list:

@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import html as _html
 import ipaddress
-from typing import Optional
+from typing import Dict, Optional
+
+# File extensions that indicate a dangerous/executable attachment. Shared by
+# the parser (which flags them on each attachment) and the heuristic
+# attachment check so the two can never drift apart.
+DANGEROUS_EXT = {
+    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
+    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
+}
 
 # private IP ranges
 _INTERNAL_NETWORKS = [
@@ -38,3 +47,30 @@ def extract_ip(text: str) -> Optional[str]:
         return str(ipaddress.ip_address(candidate))
     except ValueError:
         return None
+
+
+def esc(value: object) -> str:
+    """HTML-escape any value for safe rendering (None renders as empty)."""
+    return _html.escape("" if value is None else str(value), quote=True)
+
+
+def confusion_metrics(tp: int, fp: int, tn: int, fn: int) -> Dict[str, float]:
+    """Binary accuracy/precision/recall/f1 from a confusion matrix.
+
+    Guards every denominator so an empty class yields 0.0 rather than a
+    ZeroDivisionError. Kept dependency-free (no numpy/sklearn) so the CLI
+    validation path stays usable in minimal installs.
+    """
+    total = tp + fp + tn + fn
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if (precision + recall) else 0.0)
+    accuracy = (tp + tn) / total if total else 0.0
+    return {
+        "total": total,
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }

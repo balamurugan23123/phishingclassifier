@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .iocs import all_urls, extract_iocs
 from .ml import fuzzy_brand_hit, normalize_confusables
 from .parser import ParsedEmail
+from .utils import DANGEROUS_EXT
 
 # signal weights
 W_HIGH = 20
@@ -56,11 +57,6 @@ LOOKALIKES = {
 URL_SHORTENERS = {
     "bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "buff.ly",
     "rebrand.ly", "cutt.ly", "shorturl.at", "rb.gy", "tiny.cc",
-}
-
-DANGEROUS_EXT = {
-    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
-    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
 }
 
 URGENCY_KEYWORDS = [

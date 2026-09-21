@@ -11,6 +11,7 @@ from .enrich import EnrichmentState, enrich_result
 from .heuristics import analyze_signals
 from .parser import parse_eml
 from .report import batch_json, build_result, write_html, write_markdown
+from .utils import confusion_metrics
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -205,10 +206,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"Phish samples: {len(p_scores):>4}  |  Ham samples: {len(h_scores):>4}")
     print(f"TP: {tp:>3}   FP: {fp:>3}")
     print(f"FN: {fn:>3}   TN: {tn:>3}")
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    print(f"Precision: {precision:.3f}   Recall: {recall:.3f}   F1: {f1:.3f}")
+    m = confusion_metrics(tp, fp, tn, fn)
+    print(f"Precision: {m['precision']:.3f}   "
+          f"Recall: {m['recall']:.3f}   F1: {m['f1']:.3f}")
     return 0
 
 
@@ -261,10 +261,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
             })
 
     total = tp + fp + tn + fn
-    accuracy = (tp + tn) / total if total else 0.0
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    m = confusion_metrics(tp, fp, tn, fn)
+    accuracy, precision, recall, f1 = (
+        m["accuracy"], m["precision"], m["recall"], m["f1"])
 
     print(f"\n=== Dataset Validation: {args.csv_path} ===")
     print(f"Rows evaluated: {total} (from {len(dataset)} total)")
