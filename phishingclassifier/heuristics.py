@@ -112,6 +112,53 @@ URGENCY_KEYWORDS = [
     "unauthorized access",
 ]
 
+# Urgency / credential-lure phrases in the most common phishing languages.
+# The corpus is overwhelmingly English, but non-English 419 and BEC campaigns
+# are widespread; these are matched alongside the English keywords. Each entry
+# is (language-code, phrase) and both these and the body are run through
+# normalize_confusables at build time, so accents/homoglyphs stay consistent
+# on both sides of the match.
+URGENCY_KEYWORDS_I18N = [
+    ("es", "verifique su cuenta"),
+    ("es", "confirme su identidad"),
+    ("es", "su cuenta será suspendida"),
+    ("es", "actividad inusual"),
+    ("es", "urgentemente"),
+    ("es", "de inmediato"),
+    ("es", "último aviso"),
+    ("fr", "vérifiez votre compte"),
+    ("fr", "confirmez votre identité"),
+    ("fr", "votre compte sera suspendu"),
+    ("fr", "activité inhabituelle"),
+    ("fr", "urgemment"),
+    ("fr", "immédiatement"),
+    ("de", "bestätigen sie ihr konto"),
+    ("de", "identität bestätigen"),
+    ("de", "konto wurde gesperrt"),
+    ("de", "dringend"),
+    ("de", "sofort"),
+    ("de", "letzte warnung"),
+    ("pt", "verifique sua conta"),
+    ("pt", "confirme sua identidade"),
+    ("pt", "sua conta será suspensa"),
+    ("pt", "urgentemente"),
+    ("pt", "imediatamente"),
+    ("it", "verifica il tuo account"),
+    ("it", "conferma la tua identità"),
+    ("it", "il tuo account sarà sospeso"),
+    ("it", "urgentemente"),
+]
+
+
+def _build_urgency_phrases() -> List[tuple]:
+    """Pre-normalize every urgency phrase once at import for fast matching."""
+    out = [(normalize_confusables(p), "en") for p in URGENCY_KEYWORDS]
+    out += [(normalize_confusables(p), lang) for lang, p in URGENCY_KEYWORDS_I18N]
+    return out
+
+
+_URGENCY_PHRASES = _build_urgency_phrases()
+
 FREE_WEBMAIL_DOMAINS = {
     "gmail.com",
     "yahoo.com",
@@ -764,13 +811,11 @@ def _check_attachments(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> No
 
 
 def _check_urgency(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
-    haystack = (
-        parsed.subject + "\n" + parsed.text_body + "\n" + re.sub(r"<[^>]+>", " ", parsed.html_body)
-    ).lower()
+    hay = _haystack(parsed)
     fired, total_weight = [], 0
-    for kw in URGENCY_KEYWORDS:
-        if kw in haystack:
-            fired.append(kw)
+    for phrase, lang in _URGENCY_PHRASES:
+        if phrase in hay:
+            fired.append(phrase if lang == "en" else f"{phrase} [{lang}]")
             total_weight += W_LOW
     if fired:
         capped = min(total_weight, W_MEDHIGH)

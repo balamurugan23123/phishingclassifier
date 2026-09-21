@@ -7,6 +7,7 @@ from phishingclassifier.heuristics import (
     _check_mailer,
     _check_received_chain,
     _check_reply_chain,
+    _check_urgency,
     _haystack,
     analyze_signals,
 )
@@ -217,3 +218,30 @@ def test_received_backdated_chain_flagged():
 
 def test_received_unparseable_dates_are_ignored():
     assert _received_signals(["from a by b; nope", "from c by d; also nope"]) == []
+
+
+def _urgency_signals(subject="", text="", html=""):
+    parsed = SimpleNamespace(subject=subject, text_body=text, html_body=html)
+    signals = []
+    _check_urgency(parsed, signals)
+    return signals
+
+
+def test_urgency_matches_multilingual_phrases():
+    s = _urgency_signals(
+        subject="Acci\u00f3n requerida",
+        text="Por favor verifique su cuenta de inmediato.",
+    )
+    assert [x["id"] for x in s] == ["urgency_keywords"]
+    ev = s[0]["evidence"]
+    assert "verifique su cuenta" in ev
+    assert "[es]" in ev
+
+
+def test_urgency_still_matches_english():
+    s = _urgency_signals(text="Please verify your account immediately")
+    assert any(x["id"] == "urgency_keywords" for x in s)
+
+
+def test_urgency_clean_text_fires_nothing():
+    assert _urgency_signals(text="Here is the quarterly report you asked for. Thanks!") == []
