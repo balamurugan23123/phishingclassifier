@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 from typing import List
@@ -13,12 +15,34 @@ from .parser import parse_eml
 from .report import batch_json, build_result, write_html, write_markdown
 from .utils import confusion_metrics
 
+logger = logging.getLogger("phishingclassifier.cli")
+
+_LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
+
+
+def _configure_logging(level: str) -> None:
+    """Send diagnostics to stderr; keep stdout reserved for report output.
+
+    Libraries under ``phishingclassifier`` only ever call ``getLogger`` and
+    never configure handlers themselves -- this CLI entry point owns the
+    configuration so the tool's structured results on stdout stay clean.
+    """
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.WARNING),
+        format="%(levelname)s %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="phishingclassifier",
         description="Phishing email investigation tool: parse, extract IOCs, score, and report.",
     )
+    ap.add_argument("--log-level", choices=_LOG_LEVELS,
+                    default=os.environ.get("PHISHSLEUTH_LOGLEVEL", "warning"),
+                    help="Diagnostic logging level (default: warning). "
+                         "Set PHISHSLEUTH_LOGLEVEL to change it without flags.")
     sub = ap.add_subparsers(dest="command", required=True)
 
     analyze = sub.add_parser("analyze", help="Analyze one .eml file or a folder")
@@ -155,7 +179,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             analysis = analyze_signals(parsed)
             result = build_result(parsed, analysis)
         except Exception as exc:
-            print(f"[!] Failed {path.name}: {exc}", file=sys.stderr)
+            logger.warning("failed %s: %s", path.name, exc)
             continue
         result["enrichment"] = enrich_result(result, state)
         if result["enrichment"].get("mode") == "live":
@@ -191,7 +215,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 result = build_result(parsed, analysis)
                 scores.append(result["score"]["score"])
             except Exception as exc:
-                print(f"[!] skip {path.name}: {exc}", file=sys.stderr)
+                logger.warning("skip %s: %s", path.name, exc)
         return scores
 
     p_scores = _score_folder(args.phish_dir)
@@ -401,6 +425,7 @@ def main(argv=None) -> int:
 
     observability.init()
     args = _build_arg_parser().parse_args(argv)
+    _configure_logging(args.log_level)
     try:
         if args.command == "analyze":
             return cmd_analyze(args)
@@ -419,7 +444,7 @@ def main(argv=None) -> int:
     except Exception as exc:
         observability.capture_exception(exc, surface="cli",
                                         command=args.command)
-        print(f"error: {exc}", file=sys.stderr)
+        logger.error("%s", exc)
         return 1
 
 

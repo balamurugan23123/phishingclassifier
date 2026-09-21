@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE = MODEL_DIR / "phish_model.joblib"
@@ -204,6 +207,7 @@ def load_model():
         _MODEL_CACHE["pipeline"] = pipe
         return pipe
     except Exception:
+        logger.warning("failed to load model from %s", MODEL_FILE, exc_info=True)
         return None
 
 

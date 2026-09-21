@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -10,6 +11,8 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 5.0
 READ_TIMEOUT = 15.0
@@ -113,6 +116,10 @@ class EnrichmentState:
                     self.cache_path.read_text(encoding="utf-8")
                 )
         except (OSError, json.JSONDecodeError):
+            # A corrupt/unreadable cache is recoverable (we start empty),
+            # but silently discarding it can confuse an analyst -- log it.
+            logger.warning("could not read VT cache %s; starting empty",
+                           self.cache_path, exc_info=True)
             self._cache = {}
         # Drop stale (and legacy, untimed) entries so the cache file cannot
         # grow without bound and never serves outdated verdicts.

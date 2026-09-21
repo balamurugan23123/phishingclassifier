@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .scoring import score_result
 from .utils import esc as _esc
+
+logger = logging.getLogger(__name__)
 
 _VERDICT_EMOJI = {
     "Clean": "[CLEAN]",
@@ -62,7 +65,10 @@ def build_result(parsed, analysis: Dict[str, Any]) -> Dict[str, Any]:
             result["ml"] = classify(
                 parsed, analysis["signals"], analysis["iocs"])
     except Exception:
-        pass
+        # ML is a best-effort second opinion; a failure here must never
+        # block the rule-based report, but it should be visible when debugging.
+        logger.debug("ml classify failed for %s", parsed.source_path,
+                     exc_info=True)
     return result
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -10,6 +11,8 @@ from .iocs import all_urls, extract_iocs
 from .ml import fuzzy_brand_hit, normalize_confusables
 from .parser import ParsedEmail
 from .utils import DANGEROUS_EXT
+
+logger = logging.getLogger(__name__)
 
 # signal weights
 W_HIGH = 20
@@ -285,7 +288,10 @@ def _check_message_id_date(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -
                     f"Date: {parsed.headers.get('date', '')}",
                 ))
         except Exception:
-            pass
+            # Malformed/unparseable Date headers are common in real corpora;
+            # skip the date signal but leave a trace for debugging.
+            logger.debug("could not parse Date header %r",
+                         parsed.headers.get("date", ""), exc_info=True)
 
 
 def _check_origin_ip(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:

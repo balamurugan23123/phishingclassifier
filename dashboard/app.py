@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -22,6 +23,13 @@ from phishingclassifier.utils import esc as _esc
 # Streamlit Cloud secrets — bridged below). Evidence-scrubbing is inside
 # the module; the DSN lookup itself needs no secrets here.
 observability.init()
+
+# Surface library diagnostics (cache/model/API warnings) in the server log.
+# Streamlit may already install root handlers, so basicConfig is a no-op guard:
+# we only bump the level if nothing else has configured logging yet.
+logging.basicConfig(level=logging.WARNING,
+                    format="%(levelname)s %(name)s: %(message)s",
+                    stream=sys.stderr)
 
 st.set_page_config(
     page_title="Phishing Classifier — triage",
