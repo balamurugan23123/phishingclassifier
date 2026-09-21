@@ -48,7 +48,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # Floor is 3.12 because the pinned scientific stack (numpy 2.5 / scipy
+        # 1.18 / scikit-learn 1.9) has no Python 3.11 support -- see the
+        # requires-python contract in pyproject.toml.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

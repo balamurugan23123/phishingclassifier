@@ -1,0 +1,17 @@
+# CodeQL configuration for GitHub code scanning (default setup).
+#
+# Security queries are meant for the shipped attack surface (the
+# `phishingclassifier` package and the dashboard). They are pure noise on
+# test files, where domain-like string literals are asserted for presence in
+# generated reports -- CodeQL's `py/incomplete-url-substring-sanitization`
+# pattern-matches those as if they were host allow-lists (see alerts on
+# tests/test_iocs.py and tests/test_scoring.py, all false positives).
+#
+# After adding this file, point the default setup at it:
+#   Settings -> Code security and analysis -> CodeQL -> code scanning
+#   default setup -> add configuration file -> .github/codeql/codeql-config.yml
+name: "PhishSleuth CodeQL"
+
+paths-ignore:
+  - tests
+  - .agents

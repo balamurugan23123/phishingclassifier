@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "phishsleuth"
 description = "Explainable phishing-email investigation tool: parse, extract IOCs, score, enrich, and report."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 dynamic = ["version", "dependencies"]
 keywords = ["phishing", "security", "email", "ioc", "classifier", "soc"]
@@ -39,7 +39,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 exclude = [".venv", "venv", "__pycache__"]
 
 [tool.ruff.lint]
