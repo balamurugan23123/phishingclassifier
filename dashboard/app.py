@@ -52,9 +52,6 @@ RAIL_INK = "#0b0f12"
 MAX_INPUT_BYTES = 5 * 1024 * 1024
 
 CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
  --ink-0:#0b0f12; --ink-1:#12181d; --ink-2:#1a2228;
@@ -62,7 +59,13 @@ CSS = """
  --txt:#e6ebee; --txt-mut:#8fa1ad; --txt-dim:#5c6b76;
  --acc:#22d3ee; --acc-dim:rgba(34,211,238,.12);
  --bad:#f87171; --warn:#fbbf24; --ok:#4ade80;
- --font-display:'Space Grotesk',sans-serif; --font-mono:'JetBrains Mono',monospace;
+ /* Local system-font stacks only. The dashboard deliberately loads ZERO
+    remote resources (same opsec rule as the HTML reports): no webfont is
+    fetched, so an analyst's IP/user-agent is never leaked to a third party. */
+ --font-display:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,
+    Helvetica,Arial,sans-serif;
+ --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,
+    "Liberation Mono","Courier New",monospace;
 }
 /* page shell */
 .appview-container, .block-container, section[data-testid="stSidebar"],
@@ -270,6 +273,30 @@ def _analyze_bytes(raw: bytes, source: str) -> dict:
 # slider tweak in one tab does not re-parse and re-score emails elsewhere.
 _analyze_bytes = st.cache_data(_analyze_bytes, show_spinner="Analyzing\u2026")
 _load_results = st.cache_data(_load_results)
+
+
+def _analyze_many(items: list) -> list:
+    """Analyze a list of (raw_bytes, source) pairs defensively.
+
+    User-supplied .eml files are untrusted and can be malformed in ways the
+    parser's own guards don't cover. One bad file must not tear down the whole
+    tab: analyze each in isolation, surface failures inline, and render only
+    the ones that succeeded.
+    """
+    results, failures = [], []
+    for raw, source in items:
+        try:
+            results.append(_analyze_bytes(raw, source))
+        except Exception as exc:  # noqa: BLE001 - deliberate per-file guard
+            failures.append((source, exc))
+    for source, exc in failures:
+        st.error(
+            f"Could not analyze <b>{_esc(source)}</b>: "
+            f"{_esc(type(exc).__name__)} \u2014 the rest of your files "
+            "are shown below.",
+            unsafe_allow_html=True,
+        )
+    return results
 
 
 def _ioc_lines(result: dict) -> list:
@@ -642,11 +669,7 @@ full per-corpus breakdown and known blind spots.</div>
                 )
             else:
                 _render_cases(
-                    [
-                        _analyze_bytes(
-                            pasted.encode("utf-8", errors="replace"), source="(pasted email)"
-                        )
-                    ],
+                    _analyze_many([(pasted.encode("utf-8", errors="replace"), "(pasted email)")]),
                     export_key="paste",
                 )
 
@@ -671,7 +694,7 @@ full per-corpus breakdown and known blind spots.</div>
             accepted = [up for up in uploads if up.size <= MAX_INPUT_BYTES]
             if accepted:
                 _render_cases(
-                    [_analyze_bytes(up.getvalue(), source=up.name) for up in accepted],
+                    _analyze_many([(up.getvalue(), up.name) for up in accepted]),
                     export_key="upload",
                 )
 
