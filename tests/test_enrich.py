@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from phishingclassifier.enrich import (
-    EnrichmentState, VT_MIN_INTERVAL, enrich_result,
+    EnrichmentState,
+    VT_MIN_INTERVAL,
+    enrich_result,
 )
 from phishingclassifier.heuristics import analyze_signals
 from phishingclassifier.parser import parse_eml
@@ -172,8 +174,12 @@ def test_enrich_result_overlaps_urlscan_with_vt_and_preserves_order(monkeypatch,
         return {"source": "virustotal", "type": "domain", "malicious": 2}
 
     def fake_urlscan(d):
-        return {"source": "urlscan", "type": "domain_search",
-                "total_existing_scans": 7, "verdicts_seen": ["malicious"]}
+        return {
+            "source": "urlscan",
+            "type": "domain_search",
+            "total_existing_scans": 7,
+            "verdicts_seen": ["malicious"],
+        }
 
     monkeypatch.setattr(state, "vt_ip", fake_vt_ip)
     monkeypatch.setattr(state, "vt_domain", fake_vt_domain)
@@ -181,15 +187,16 @@ def test_enrich_result_overlaps_urlscan_with_vt_and_preserves_order(monkeypatch,
 
     result = {
         "origin_ip": None,
-        "iocs": {"domains": {"header": ["a.test", "b.test"], "body": []},
-                 "attachment_hashes": []},
+        "iocs": {"domains": {"header": ["a.test", "b.test"], "body": []}, "attachment_hashes": []},
     }
     block = enrich_result(result, state, max_lookups=20)
     assert block["mode"] == "live"
     # each domain yields a VT result then its urlscan result, in order
-    assert [ (lk["ioc"], lk["source"]) for lk in block["lookups"] ] == [
-        ("a.test", "virustotal"), ("a.test", "urlscan"),
-        ("b.test", "virustotal"), ("b.test", "urlscan"),
+    assert [(lk["ioc"], lk["source"]) for lk in block["lookups"]] == [
+        ("a.test", "virustotal"),
+        ("a.test", "urlscan"),
+        ("b.test", "virustotal"),
+        ("b.test", "urlscan"),
     ]
 
 

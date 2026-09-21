@@ -20,7 +20,7 @@ classifiers = [
 phishsleuth = "phishingclassifier.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "pip-audit>=2.7"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pip-audit>=2.7"]
 
 # Single source of truth for runtime deps: the pins in requirements.txt are
 # read directly, so pyproject and the deployment file can never drift.
@@ -52,3 +52,18 @@ select = ["E4", "E7", "E9", "F"]
 # bootstrap is required for Streamlit Cloud, which installs requirements.txt
 # but not the local package itself.
 "dashboard/app.py" = ["E402"]
+
+[tool.ruff.format]
+# Formatting is handled by `ruff format` (Black-compatible) rather than a
+# separate black dependency, so lint + format share one tool and config.
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+# Type-check the importable package only. The dashboard relies on a runtime
+# sys.path bootstrap and Streamlit's dynamic API, and scripts/ are one-off
+# tools -- neither benefits from strict static typing today. python_version is
+# intentionally unset: mypy uses the running interpreter, which is what lets it
+# parse the PEP 695 syntax in modern numpy/scipy stubs.
+files = ["phishingclassifier"]
+ignore_missing_imports = true

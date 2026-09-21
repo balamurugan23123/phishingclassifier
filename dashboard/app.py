@@ -27,9 +27,9 @@ observability.init()
 # Surface library diagnostics (cache/model/API warnings) in the server log.
 # Streamlit may already install root handlers, so basicConfig is a no-op guard:
 # we only bump the level if nothing else has configured logging yet.
-logging.basicConfig(level=logging.WARNING,
-                    format="%(levelname)s %(name)s: %(message)s",
-                    stream=sys.stderr)
+logging.basicConfig(
+    level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr
+)
 
 st.set_page_config(
     page_title="Phishing Classifier — triage",
@@ -261,8 +261,7 @@ def _analyze_bytes(raw: bytes, source: str) -> dict:
     parsed = parse_eml_bytes(raw, source_path=source)
     analysis = analyze_signals(parsed)
     result = build_result(parsed, analysis)
-    result["enrichment"] = {"mode": "offline (user input, no lookup)",
-                            "lookups": [], "errors": []}
+    result["enrichment"] = {"mode": "offline (user input, no lookup)", "lookups": [], "errors": []}
     return result
 
 
@@ -278,15 +277,12 @@ def _ioc_lines(result: dict) -> list:
     if result.get("origin_ip"):
         lines.append(f"origin-ip: {result['origin_ip']}")
     iocs = result.get("iocs") or {}
-    for url in iocs.get("urls", {}).get("header", []) + \
-            iocs.get("urls", {}).get("body", []):
+    for url in iocs.get("urls", {}).get("header", []) + iocs.get("urls", {}).get("body", []):
         lines.append(f"url: {url}")
-    for d in iocs.get("domains", {}).get("header", []) + \
-            iocs.get("domains", {}).get("body", []):
+    for d in iocs.get("domains", {}).get("header", []) + iocs.get("domains", {}).get("body", []):
         lines.append(f"domain: {d}")
     for a in iocs.get("attachment_hashes", []):
-        lines.append(f"attachment: {a.get('filename')} "
-                     f"sha256={a.get('sha256')}")
+        lines.append(f"attachment: {a.get('filename')} sha256={a.get('sha256')}")
     return lines
 
 
@@ -322,18 +318,21 @@ def _export_block(results: list, export_key: str) -> None:
     a single email). Nothing leaves the page unless the analyst clicks."""
     from phishingclassifier.report import batch_json, markdown_report
 
-    label = "Download results (JSON)" if len(results) != 1 \
-        else "Download this result (JSON)"
+    label = "Download results (JSON)" if len(results) != 1 else "Download this result (JSON)"
     st.download_button(
-        label, data=batch_json(results),
-        file_name="phishing_results.json", mime="application/json",
+        label,
+        data=batch_json(results),
+        file_name="phishing_results.json",
+        mime="application/json",
         key=f"dl_json_{export_key}",
     )
     if len(results) == 1:
         stem = Path(results[0]["file"]).stem or "email"
         st.download_button(
-            "Download report (Markdown)", data=markdown_report(results[0]),
-            file_name=f"{stem}.md", mime="text/markdown",
+            "Download report (Markdown)",
+            data=markdown_report(results[0]),
+            file_name=f"{stem}.md",
+            mime="text/markdown",
             key=f"dl_md_{export_key}",
         )
 
@@ -355,16 +354,14 @@ def _render_cases(results: list, export_key: str = "view") -> None:
         color = RAIL_COLOR[verdict]
         auth_html = _auth_line(r)
         subject = (r.get("subject") or "(no subject)")[:96]
-        from_line = (f"{_esc(r.get('from_display', ''))} "
-                     f"&lt;{_esc(r.get('from', ''))}&gt;")
+        from_line = f"{_esc(r.get('from_display', ''))} &lt;{_esc(r.get('from', ''))}&gt;"
         # ML second opinion: rendered only when a trained model exists.
         # pct >= 60 red-flagged, >= 30 amber, below stays neutral.
         ml = r.get("ml")
         if ml:
             pct = ml.get("probability_phishing", 0) * 100
             cls = "bad" if pct >= 60 else ("warn" if pct >= 30 else "")
-            ml_html = (f"<span class='{cls}'>ML <b>{pct:.0f}%</b> "
-                       f"phishing</span>")
+            ml_html = f"<span class='{cls}'>ML <b>{pct:.0f}%</b> phishing</span>"
         else:
             ml_html = ""
         head_html = f"""
@@ -372,11 +369,11 @@ def _render_cases(results: list, export_key: str = "view") -> None:
  <div class="pc-case-inner">
   <div class="pc-head">
    <div class="pc-rail" style="background:{color}">
-    <div class="pc-rail-score">{score['score']}</div>
+    <div class="pc-rail-score">{score["score"]}</div>
     <div class="pc-rail-verdict">{_esc(verdict)}</div>
    </div>
    <div style="min-width:0">
-    <div class="pc-head-file">{_esc(Path(r['file']).name)}</div>
+    <div class="pc-head-file">{_esc(Path(r["file"]).name)}</div>
     <div class="pc-head-sub">{_esc(subject)}</div>
    </div>
   </div>
@@ -385,7 +382,7 @@ def _render_cases(results: list, export_key: str = "view") -> None:
    {f"<span>Reply-To <b>{_esc(r['reply_to'])}</b></span>" if r.get("reply_to") else ""}
    {f"<span>Origin <b>{_esc(r['origin_ip'])}</b></span>" if r.get("origin_ip") else ""}
    <span>{auth_html}</span>
-   <span>Hops <b>{r.get('received_hops', 0)}</b></span>
+   <span>Hops <b>{r.get("received_hops", 0)}</b></span>
    {ml_html}
   </div>
 """
@@ -393,12 +390,10 @@ def _render_cases(results: list, export_key: str = "view") -> None:
 
         with st.expander("Evidence", expanded=False):
             # ---- fired signals: weight chip + id + reason -------------------
-            st.markdown("<p class='pc-lead-sm'>Fired signals</p>",
-                        unsafe_allow_html=True)
+            st.markdown("<p class='pc-lead-sm'>Fired signals</p>", unsafe_allow_html=True)
             if r.get("signals"):
                 rows = []
-                for s in sorted(r["signals"],
-                                key=lambda x: (-x["weight"], x["id"])):
+                for s in sorted(r["signals"], key=lambda x: (-x["weight"], x["id"])):
                     w = s["weight"]
                     if w >= 20:
                         wcls = "w-hi"
@@ -409,47 +404,49 @@ def _render_cases(results: list, export_key: str = "view") -> None:
                     rows.append(f"""
 <div class='pc-sig {wcls}'>
  <span class='pc-sig-w'>{w}</span>
- <span class='pc-sig-id'>{_esc(s['id'])}</span>
- <span class='pc-sig-reason'>{_esc(s['reason'])}</span>
+ <span class='pc-sig-id'>{_esc(s["id"])}</span>
+ <span class='pc-sig-reason'>{_esc(s["reason"])}</span>
 </div>""")
                 st.markdown("".join(rows), unsafe_allow_html=True)
             else:
                 st.markdown(
                     "<div class='pc-sig-empty'>No signals fired — "
                     "nothing in this email matched any rule.</div>",
-                    unsafe_allow_html=True)
+                    unsafe_allow_html=True,
+                )
 
             # ---- IOCs: plain text, never clickable -------------------------
-            st.markdown("<p class='pc-lead-sm'>IOCs — plain text, "
-                        "never click or scan</p>", unsafe_allow_html=True)
+            st.markdown(
+                "<p class='pc-lead-sm'>IOCs — plain text, never click or scan</p>",
+                unsafe_allow_html=True,
+            )
             st.code("\n".join(_ioc_lines(r)) or "(none)", language="text")
 
             # ---- enrichment lookups ----------------------------------------
             enrich = r.get("enrichment") or {}
-            st.markdown("<p class='pc-lead-sm'>Enrichment — "
-                        f"{enrich.get('mode', 'offline')}</p>",
-                        unsafe_allow_html=True)
+            st.markdown(
+                f"<p class='pc-lead-sm'>Enrichment — {enrich.get('mode', 'offline')}</p>",
+                unsafe_allow_html=True,
+            )
             lookups = enrich.get("lookups", [])
             if lookups:
                 lk_rows = []
                 for lk in lookups:
                     mal = lk.get("malicious")
-                    bad = "bad" if (isinstance(mal, (int, float))
-                                   and mal >= 3) else ""
+                    bad = "bad" if (isinstance(mal, (int, float)) and mal >= 3) else ""
                     lk_rows.append(f"""
 <div class='pc-lk'>
- <span class='pc-lk-ioc'>{_esc(lk.get('ioc', ''))}</span>
- <span class='pc-lk-src'>{_esc(lk.get('source', ''))}</span>
- <span class='{bad}'>malicious <b>{_esc(mal if mal is not None else '—')}</b></span>
- <span>reputation <b>{_esc(lk.get('reputation', '—'))}</b></span>
+ <span class='pc-lk-ioc'>{_esc(lk.get("ioc", ""))}</span>
+ <span class='pc-lk-src'>{_esc(lk.get("source", ""))}</span>
+ <span class='{bad}'>malicious <b>{_esc(mal if mal is not None else "—")}</b></span>
+ <span>reputation <b>{_esc(lk.get("reputation", "—"))}</b></span>
 </div>""")
                 st.markdown("".join(lk_rows), unsafe_allow_html=True)
             elif enrich.get("mode", "").startswith("live"):
                 st.markdown("_No lookups returned data._")
 
             if r.get("parser_warnings"):
-                st.markdown("<p class='pc-lead-sm'>Parser warnings</p>",
-                            unsafe_allow_html=True)
+                st.markdown("<p class='pc-lead-sm'>Parser warnings</p>", unsafe_allow_html=True)
                 for w in r["parser_warnings"]:
                     st.markdown(f"- {_esc(w)}")
         st.markdown("</div></div>", unsafe_allow_html=True)
@@ -502,7 +499,8 @@ def _sidebar_integrations() -> None:
     live = state_info.get("mode") == "live"
     dot = "<span class='pc-dot on'></span>" if live else "<span class='pc-dot'></span>"
     mode_word = "LIVE" if live else "OFFLINE"
-    st.markdown(f"""
+    st.markdown(
+        f"""
 <div class='pc-int-card'>
  <div class='pc-int-mode'>{dot}{mode_word}</div>
  <div class='pc-int-row'>
@@ -520,7 +518,9 @@ def _sidebar_integrations() -> None:
  links for new scans, so a scammer's site gets no alert that it's being
  investigated. Keys live in <b>.env</b> locally or <b>Secrets</b> when
  hosted.</div>
-</div>""", unsafe_allow_html=True)
+</div>""",
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
@@ -528,9 +528,11 @@ def main() -> None:
         _main()
     except Exception as exc:  # crash page + telemetry; never a bare stack
         observability.capture_exception(exc, surface="dashboard")
-        st.error("Something broke while building this page. The error has "
-                 "been logged." if observability.enabled()
-                 else "Something broke while building this page.")
+        st.error(
+            "Something broke while building this page. The error has been logged."
+            if observability.enabled()
+            else "Something broke while building this page."
+        )
         raise
 
 
@@ -578,11 +580,14 @@ engine, not the ML layer, is the primary verdict — see the README for the
 full per-corpus breakdown and known blind spots.</div>
 """
     st.markdown(hero_html, unsafe_allow_html=True)
-    st.caption("Scores are decision support, not proof. Treat every link "
-               "in a suspicious email as live: don't click, don't scan.")
+    st.caption(
+        "Scores are decision support, not proof. Treat every link "
+        "in a suspicious email as live: don't click, don't scan."
+    )
 
     tab_demo, tab_paste, tab_upload, tab_batch = st.tabs(
-        ["Try the demo", "Paste an email", "Upload files", "Earlier results"])
+        ["Try the demo", "Paste an email", "Upload files", "Earlier results"]
+    )
 
     # sidebar is global: integrations render exactly once, not per-tab
     with st.sidebar:
@@ -605,8 +610,7 @@ full per-corpus breakdown and known blind spots.</div>
                 continue
             demo_results.append(_analyze_bytes(path.read_bytes(), source=name))
         if demo_results:
-            st.caption(" · ".join(
-                f"`{n}` {d}" for n, d in DEMO_EMAILS.items()))
+            st.caption(" · ".join(f"`{n}` {d}" for n, d in DEMO_EMAILS.items()))
             _render_cases(demo_results, export_key="demo")
 
     with tab_paste:
@@ -621,9 +625,11 @@ full per-corpus breakdown and known blind spots.</div>
         pasted = st.text_area(
             "Raw email",
             height=240,
-            placeholder=("From: \"PayPal Support\" <security@paypa1-alerts.com>\n"
-                         "Subject: URGENT: verify your account\n"
-                         "...\n\nDear Customer, click here to verify..."),
+            placeholder=(
+                'From: "PayPal Support" <security@paypa1-alerts.com>\n'
+                "Subject: URGENT: verify your account\n"
+                "...\n\nDear Customer, click here to verify..."
+            ),
         )
         if st.button("Analyze pasted email", type="primary"):
             if not pasted.strip():
@@ -632,11 +638,17 @@ full per-corpus breakdown and known blind spots.</div>
                 st.error(
                     f"That email is larger than the "
                     f"{MAX_INPUT_BYTES // (1024 * 1024)} MiB limit. "
-                    "Trim it or analyze the file with the command-line tool.")
+                    "Trim it or analyze the file with the command-line tool."
+                )
             else:
-                _render_cases([_analyze_bytes(
-                    pasted.encode("utf-8", errors="replace"),
-                    source="(pasted email)")], export_key="paste")
+                _render_cases(
+                    [
+                        _analyze_bytes(
+                            pasted.encode("utf-8", errors="replace"), source="(pasted email)"
+                        )
+                    ],
+                    export_key="paste",
+                )
 
     with tab_upload:
         st.markdown(
@@ -651,18 +663,17 @@ full per-corpus breakdown and known blind spots.</div>
             accept_multiple_files=True,
         )
         if uploads:
-            oversized = [up.name for up in uploads
-                         if up.size > MAX_INPUT_BYTES]
+            oversized = [up.name for up in uploads if up.size > MAX_INPUT_BYTES]
             for name in oversized:
                 st.warning(
-                    f"Skipped {name}: larger than the "
-                    f"{MAX_INPUT_BYTES // (1024 * 1024)} MiB limit.")
+                    f"Skipped {name}: larger than the {MAX_INPUT_BYTES // (1024 * 1024)} MiB limit."
+                )
             accepted = [up for up in uploads if up.size <= MAX_INPUT_BYTES]
             if accepted:
-                _render_cases([
-                    _analyze_bytes(up.getvalue(), source=up.name)
-                    for up in accepted
-                ], export_key="upload")
+                _render_cases(
+                    [_analyze_bytes(up.getvalue(), source=up.name) for up in accepted],
+                    export_key="upload",
+                )
 
     with tab_batch:
         st.markdown(
@@ -685,17 +696,15 @@ full per-corpus breakdown and known blind spots.</div>
                 "`samples/demo_batch/results.json`."
             )
         except json.JSONDecodeError:
-            st.error("The results file isn't valid JSON — re-run the "
-                     "analysis that produced it.")
+            st.error("The results file isn't valid JSON — re-run the analysis that produced it.")
         else:
             c1, c2, c3 = st.columns([2, 2, 2])
             with c1:
-                verdicts = st.multiselect("Verdict", VERDICT_ORDER,
-                                           default=VERDICT_ORDER,
-                                           key="batch_verdicts")
+                verdicts = st.multiselect(
+                    "Verdict", VERDICT_ORDER, default=VERDICT_ORDER, key="batch_verdicts"
+                )
             with c2:
-                score_lo, score_hi = st.slider("Score range", 0, 100,
-                                               (0, 100), key="batch_score")
+                score_lo, score_hi = st.slider("Score range", 0, 100, (0, 100), key="batch_score")
             with c3:
                 search = st.text_input(
                     "Subject/sender contains",
@@ -707,9 +716,10 @@ full per-corpus breakdown and known blind spots.</div>
                     return False
                 if not (score_lo <= r["score"]["score"] <= score_hi):
                     return False
-                if search and search not in (
-                    (r.get("subject", "") + " " + r.get("from", ""))
-                ).lower():
+                if (
+                    search
+                    and search not in (r.get("subject", "") + " " + r.get("from", "")).lower()
+                ):
                     return False
                 return True
 

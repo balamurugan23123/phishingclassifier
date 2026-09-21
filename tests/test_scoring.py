@@ -110,6 +110,7 @@ def test_batch_json_sorts_by_score():
     payload = batch_json(results)
     assert '"count": 3' in payload
     import json
+
     data = json.loads(payload)
     scores = [r["score"]["score"] for r in data["results"]]
     assert scores == sorted(scores, reverse=True)

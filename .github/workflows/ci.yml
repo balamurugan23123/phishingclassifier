@@ -21,6 +21,26 @@ jobs:
           cache: pip
       - run: pip install ruff
       - run: ruff check .
+      - name: Formatting check (ruff format)
+        run: ruff format --check .
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12+: mypy must parse the PEP 695 syntax used in modern
+          # numpy/scipy type stubs, so it cannot run under a 3.11 interpreter.
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt mypy
+      - name: mypy
+        run: mypy
 
   test:
     name: Test (Python ${{ matrix.python-version }})

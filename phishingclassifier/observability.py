@@ -23,18 +23,33 @@ _READY = False
 # Fields that may appear in event data or locals that could carry raw
 # email evidence. Scrubbed from every outbound event.
 _EVIDENCE_KEYS = (
-    "subject", "body", "text_body", "html_body", "raw", "pasted",
-    "content", "message", "evidence", "haystack", "value", "args",
-    "headers", "received_chain", "from_display", "reply_to",
-    "return_path", "urls", "domains", "ioc", "reason",
+    "subject",
+    "body",
+    "text_body",
+    "html_body",
+    "raw",
+    "pasted",
+    "content",
+    "message",
+    "evidence",
+    "haystack",
+    "value",
+    "args",
+    "headers",
+    "received_chain",
+    "from_display",
+    "reply_to",
+    "return_path",
+    "urls",
+    "domains",
+    "ioc",
+    "reason",
 )
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 _ADDR_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # generous IP v4/v6 matcher for Received-chain remnants
-_IP_RE = re.compile(
-    r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{1,4}\b"
-)
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{1,4}\b")
 
 
 def _scrub(value: Any, depth: int = 0) -> Any:
@@ -121,7 +136,7 @@ def init() -> bool:
             traces_sample_rate=0.05,
             # Errors only by default; switch to logs when we need them.
             attach_stacktrace=False,
-            before_send=_before_send,
+            before_send=_before_send,  # type: ignore[arg-type]
             environment=os.environ.get("SENTRY_ENV", "dev"),
         )
         _READY = True
@@ -158,7 +173,7 @@ def capture_message(text: str, level: str = "info", **tags: str) -> None:
         with sentry_sdk.new_scope() as scope:
             for k, v in tags.items():
                 scope.set_tag(k, v)
-            sentry_sdk.capture_message(clean, level=level)
+            sentry_sdk.capture_message(clean, level=level)  # type: ignore[arg-type]
     except Exception:
         pass
 

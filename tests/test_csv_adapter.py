@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from phishingclassifier.csv_adapter import (
-    load_csv_dataset, row_label, row_to_parsed,
+    load_csv_dataset,
+    row_label,
+    row_to_parsed,
 )
 from phishingclassifier.heuristics import _shannon_entropy, analyze_signals
 from phishingclassifier.report import build_result
@@ -48,8 +50,7 @@ def test_label_parsing_textual_and_numeric():
 
 def test_header_signals_never_fire_for_csv_rows():
     ds = _dataset()
-    header_ids = {"auth_header_absent", "message_id_absent",
-                  "origin_ip_internal"}
+    header_ids = {"auth_header_absent", "message_id_absent", "origin_ip_internal"}
     for d in ds:
         signals = analyze_signals(d["parsed"])["signals"]
         fired_ids = {s["id"] for s in signals}
@@ -100,8 +101,8 @@ def test_money_scam_language_fires():
         "sender": "barrister.john@attorney.net",
         "subject": "BUSINESS PROPOSAL / INHERITANCE",
         "body": "I am the next of kin attorney for a late customer. "
-                "The sum of 25.5 million dollars is in an unclaimed fund. "
-                "Wire transfer to your account. Strictly confidential.",
+        "The sum of 25.5 million dollars is in an unclaimed fund. "
+        "Wire transfer to your account. Strictly confidential.",
         "label": "1",
     }
     signals = analyze_signals(row_to_parsed(row))["signals"]
@@ -143,9 +144,10 @@ def test_correlation_bonus_requires_three_lure_signals():
     assert "lure_signal_correlation" not in {s["id"] for s in signals}
 
     row2 = {
-        "sender": "a@b.example", "subject": "urgent",
+        "sender": "a@b.example",
+        "subject": "urgent",
         "body": "dear customer, this is urgent, verify your account "
-                "immediately. unclaimed fund inheritance wire transfer.",
+        "immediately. unclaimed fund inheritance wire transfer.",
         "label": "1",
     }
     signals2 = analyze_signals(row_to_parsed(row2))["signals"]
@@ -154,14 +156,17 @@ def test_correlation_bonus_requires_three_lure_signals():
 
 def test_validate_cli_reproduces_narrative(tmp_path, capsys):
     from phishingclassifier.cli import main
-    code = main(["validate", str(SAMPLES / "labeled_sample.csv"),
-                 "--json", str(tmp_path / "v.json")])
+
+    code = main(
+        ["validate", str(SAMPLES / "labeled_sample.csv"), "--json", str(tmp_path / "v.json")]
+    )
     assert code == 0
     out = capsys.readouterr().out
     assert "Rows evaluated: 20" in out
     assert "Accuracy:  90.0%" in out
     assert "Precision: 1.000" in out
     import json
+
     stats = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
     assert stats["false_positives"] == 0
     assert stats["accuracy"] == 0.9

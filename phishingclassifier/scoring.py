@@ -32,8 +32,7 @@ def score_result(signals: List[Dict[str, Any]]) -> Dict[str, Any]:
         "verdict": verdict_for(score),
         "signal_count": len(signals),
         "top_signals": sorted(
-            ({"id": s["id"], "weight": s["weight"], "reason": s["reason"]}
-             for s in signals),
+            ({"id": s["id"], "weight": s["weight"], "reason": s["reason"]} for s in signals),
             key=lambda s: -s["weight"],
         )[:3],
     }

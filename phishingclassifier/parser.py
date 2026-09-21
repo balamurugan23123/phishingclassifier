@@ -7,6 +7,7 @@ import email.policy
 import email.utils
 import hashlib
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .utils import DANGEROUS_EXT, extract_ip, is_internal_ip
@@ -28,7 +29,7 @@ class ParsedEmail:
         self.reply_to: str = ""
         self.return_path: str = ""
         self.message_id: str = ""
-        self.date: Optional[email.utils.parsedate_to_datetime] = None
+        self.date: Optional[datetime] = None
         self.received_chain: List[str] = []
         self.origin_ip: Optional[str] = None
         self.origin_ip_reserved: Optional[bool] = None
@@ -39,6 +40,9 @@ class ParsedEmail:
         self.body_charset: str = ""
         # skip header checks when parsed from CSV row
         self.from_csv: bool = False
+        # memoization slot for heuristics._haystack(): a (key, value) pair
+        # where key is the source fields the value was derived from.
+        self._haystack_cache: Optional[tuple] = None
 
     @property
     def has_auth_header(self) -> bool:
@@ -176,7 +180,7 @@ def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
             filename = part.get_filename()
             payload: Optional[bytes] = None
             try:
-                payload = part.get_payload(decode=True)
+                payload = part.get_payload(decode=True)  # type: ignore[assignment]
             except Exception:
                 payload = None
                 parsed.warnings.append("Attachment/body part undecodable; skipped")
@@ -188,17 +192,19 @@ def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
             if is_attachment:
                 name = filename or "(unnamed)"
                 lower = name.lower()
-                ext = lower[lower.rfind("."):] if "." in lower else ""
+                ext = lower[lower.rfind(".") :] if "." in lower else ""
                 digest = hashlib.sha256(payload).hexdigest()
-                parsed.attachments.append({
-                    "filename": name,
-                    "mime": content_type,
-                    "size": len(payload),
-                    "sha256": digest,
-                    "extension": ext,
-                    "dangerous": ext in DANGEROUS_EXT,
-                    "archive": ext in _ARCHIVE_EXT,
-                })
+                parsed.attachments.append(
+                    {
+                        "filename": name,
+                        "mime": content_type,
+                        "size": len(payload),
+                        "sha256": digest,
+                        "extension": ext,
+                        "dangerous": ext in DANGEROUS_EXT,
+                        "archive": ext in _ARCHIVE_EXT,
+                    }
+                )
                 continue
 
             if content_type == "text/plain" and not parsed.text_body:

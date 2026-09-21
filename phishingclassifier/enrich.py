@@ -38,8 +38,9 @@ _CACHE_FILE = "vt_cache.json"
 class EnrichmentState:
     """Tracks API keys, cache, and rate limiting."""
 
-    def __init__(self, offline: bool = False, workdir: str = ".",
-                 cache_ttl: Optional[int] = None) -> None:
+    def __init__(
+        self, offline: bool = False, workdir: str = ".", cache_ttl: Optional[int] = None
+    ) -> None:
         self.offline = offline
         self.cache_path = Path(workdir) / _CACHE_SUBDIR / _CACHE_FILE
         self.cache_ttl = self._resolve_ttl(cache_ttl)
@@ -112,14 +113,13 @@ class EnrichmentState:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.is_file():
-                self._cache = json.loads(
-                    self.cache_path.read_text(encoding="utf-8")
-                )
+                self._cache = json.loads(self.cache_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             # A corrupt/unreadable cache is recoverable (we start empty),
             # but silently discarding it can confuse an analyst -- log it.
-            logger.warning("could not read VT cache %s; starting empty",
-                           self.cache_path, exc_info=True)
+            logger.warning(
+                "could not read VT cache %s; starting empty", self.cache_path, exc_info=True
+            )
             self._cache = {}
         # Drop stale (and legacy, untimed) entries so the cache file cannot
         # grow without bound and never serves outdated verdicts.
@@ -133,8 +133,7 @@ class EnrichmentState:
         treated as stale on purpose: better to refetch than trust a verdict
         we cannot date.
         """
-        if not isinstance(entry, dict) or "at" not in entry \
-                or "value" not in entry:
+        if not isinstance(entry, dict) or "at" not in entry or "value" not in entry:
             return True
         if self.cache_ttl <= 0:
             return True
@@ -152,9 +151,7 @@ class EnrichmentState:
         """Atomic write to cache file (caller holds the lock or init)."""
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(
-                dir=str(self.cache_path.parent), suffix=".tmp"
-            )
+            fd, tmp = tempfile.mkstemp(dir=str(self.cache_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(self._cache, fh, indent=1)
@@ -198,7 +195,8 @@ class EnrichmentState:
             return None
         try:
             resp = requests.get(
-                url, headers=headers,
+                url,
+                headers=headers,
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
             self.requests_made += 1
@@ -209,14 +207,13 @@ class EnrichmentState:
                 )
                 time.sleep(max(wait, 0.0))
                 resp = requests.get(
-                    url, headers=headers,
+                    url,
+                    headers=headers,
                     timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                 )
                 self.requests_made += 1
             if resp.status_code != 200:
-                self.errors.append(
-                    f"HTTP {resp.status_code} for {url.split('?')[0]}"
-                )
+                self.errors.append(f"HTTP {resp.status_code} for {url.split('?')[0]}")
                 return None
             return resp.json()
         except requests.RequestException as exc:
@@ -237,9 +234,7 @@ class EnrichmentState:
         if elapsed < VT_MIN_INTERVAL:
             time.sleep(VT_MIN_INTERVAL - elapsed)
         self._last_vt_request = time.monotonic()
-        data = self._http_get(
-            f"{VT_BASE}{path}", {"X-Apikey": self.vt_key}
-        )
+        data = self._http_get(f"{VT_BASE}{path}", {"X-Apikey": self.vt_key})
         if data is not None:
             self._put_cache(key, data)
         return data
@@ -258,6 +253,7 @@ class EnrichmentState:
 
     def vt_url(self, url: str) -> Optional[Dict[str, Any]]:
         import base64
+
         url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
         data = self._vt_get(f"/urls/{url_id}")
         return self._vt_summarize(data, prefix="url") if data else None
@@ -293,7 +289,7 @@ class EnrichmentState:
         try:
             resp = requests.get(
                 f"{URLSCAN_BASE}/search/",
-                params={"q": f"domain:{domain}", "size": 10},
+                params={"q": f"domain:{domain}", "size": 10},  # type: ignore[arg-type]
                 headers={"API-Key": self.urlscan_key},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
@@ -308,10 +304,14 @@ class EnrichmentState:
                 "source": "urlscan",
                 "type": "domain_search",
                 "total_existing_scans": total,
-                "verdicts_seen": sorted({
-                    (r.get("verdicts") or {}).get("overall", "")
-                    for r in results if isinstance(r, dict)
-                } - {""}),
+                "verdicts_seen": sorted(
+                    {
+                        (r.get("verdicts") or {}).get("overall", "")
+                        for r in results
+                        if isinstance(r, dict)
+                    }
+                    - {""}
+                ),
             }
             self._put_cache(key, summary)
             return summary
@@ -323,14 +323,14 @@ class EnrichmentState:
             return None
 
 
-def enrich_result(result: Dict[str, Any], state: EnrichmentState,
-                  max_lookups: int = 20) -> Dict[str, Any]:
+def enrich_result(
+    result: Dict[str, Any], state: EnrichmentState, max_lookups: int = 20
+) -> Dict[str, Any]:
     """Enrich IOCs for a single email result."""
     enrichment: Dict[str, Any] = {"mode": "offline", "lookups": [], "errors": []}
     if state.offline or not state.enabled:
         enrichment["mode"] = (
-            "offline (--offline flag)" if state.offline else
-            "offline (no API keys configured)"
+            "offline (--offline flag)" if state.offline else "offline (no API keys configured)"
         )
         return enrichment
 
@@ -347,8 +347,7 @@ def enrich_result(result: Dict[str, Any], state: EnrichmentState,
         budget -= 1
 
     iocs = result.get("iocs") or {}
-    domains = (iocs.get("domains", {}).get("header", [])
-               + iocs.get("domains", {}).get("body", []))
+    domains = iocs.get("domains", {}).get("header", []) + iocs.get("domains", {}).get("body", [])
     for domain in dict.fromkeys(domains):
         if budget <= 0:
             break
@@ -390,8 +389,7 @@ def enrich_result(result: Dict[str, Any], state: EnrichmentState,
             try:
                 slot_result[i] = fut.result()
             except Exception as exc:
-                state.errors.append(
-                    f"urlscan lookup failed: {type(exc).__name__}")
+                state.errors.append(f"urlscan lookup failed: {type(exc).__name__}")
                 slot_result[i] = None
     except Exception as exc:
         enrichment["errors"].append(f"enrichment failure: {type(exc).__name__}")
@@ -405,8 +403,7 @@ def enrich_result(result: Dict[str, Any], state: EnrichmentState,
         if not summary:
             continue
         if kind == "vt_hash":
-            enrichment["lookups"].append(
-                {"ioc": payload.get("filename", ""), **summary})
+            enrichment["lookups"].append({"ioc": payload.get("filename", ""), **summary})
         else:
             enrichment["lookups"].append({"ioc": payload, **summary})
 

@@ -10,18 +10,39 @@ from typing import Dict, Optional
 # the parser (which flags them on each attachment) and the heuristic
 # attachment check so the two can never drift apart.
 DANGEROUS_EXT = {
-    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
-    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
+    ".exe",
+    ".scr",
+    ".js",
+    ".vbs",
+    ".lnk",
+    ".hta",
+    ".docm",
+    ".xlsm",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".jar",
 }
 
 # private IP ranges
 _INTERNAL_NETWORKS = [
     ipaddress.ip_network(n)
     for n in (
-        "0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16",
-        "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "192.0.0.0/29",
-        "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4",
-        "::1/128", "fe80::/10", "fc00::/7", "ff00::/8",
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+        "192.0.0.0/29",
+        "198.18.0.0/15",
+        "224.0.0.0/4",
+        "240.0.0.0/4",
+        "::1/128",
+        "fe80::/10",
+        "fc00::/7",
+        "ff00::/8",
     )
 ]
 
@@ -64,8 +85,7 @@ def confusion_metrics(tp: int, fp: int, tn: int, fn: int) -> Dict[str, float]:
     total = tp + fp + tn + fn
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = (2 * precision * recall / (precision + recall)
-          if (precision + recall) else 0.0)
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
     accuracy = (tp + tn) / total if total else 0.0
     return {
         "total": total,

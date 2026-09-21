@@ -18,17 +18,25 @@ SAMPLES = Path(__file__).parent.parent / "samples"
 @pytest.fixture(autouse=True)
 def _no_sentry(monkeypatch):
     monkeypatch.setattr(observability, "init", lambda: False)
-    monkeypatch.setattr(observability, "capture_exception",
-                        lambda *a, **k: None)
+    monkeypatch.setattr(observability, "capture_exception", lambda *a, **k: None)
 
 
 def test_cli_analyze_offline_writes_all_outputs(tmp_path, capsys):
-    rc = cli.main([
-        "--log-level", "error", "analyze", str(FIXTURES), "--offline",
-        "--md-dir", str(tmp_path / "md"),
-        "--json", str(tmp_path / "results.json"),
-        "--html", str(tmp_path / "summary.html"),
-    ])
+    rc = cli.main(
+        [
+            "--log-level",
+            "error",
+            "analyze",
+            str(FIXTURES),
+            "--offline",
+            "--md-dir",
+            str(tmp_path / "md"),
+            "--json",
+            str(tmp_path / "results.json"),
+            "--html",
+            str(tmp_path / "summary.html"),
+        ]
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert "===" in out  # per-email summary printed
@@ -40,10 +48,15 @@ def test_cli_analyze_offline_writes_all_outputs(tmp_path, capsys):
 
 
 def test_cli_analyze_single_file_offline(tmp_path):
-    rc = cli.main([
-        "analyze", str(FIXTURES / "spoofed.eml"), "--offline",
-        "--md-dir", str(tmp_path / "md"),
-    ])
+    rc = cli.main(
+        [
+            "analyze",
+            str(FIXTURES / "spoofed.eml"),
+            "--offline",
+            "--md-dir",
+            str(tmp_path / "md"),
+        ]
+    )
     assert rc == 0
     assert list((tmp_path / "md").glob("*.md"))
 
@@ -81,8 +94,7 @@ def test_enrichment_feedback_signals_from_verdicts():
         "mode": "live",
         "lookups": [
             {"source": "virustotal", "ioc": "http://evil.test", "malicious": 5},
-            {"source": "urlscan", "ioc": "http://evil.test",
-             "verdicts_seen": ["malicious"]},
+            {"source": "urlscan", "ioc": "http://evil.test", "verdicts_seen": ["malicious"]},
             {"source": "virustotal", "ioc": "http://clean.test", "malicious": 1},
         ],
     }

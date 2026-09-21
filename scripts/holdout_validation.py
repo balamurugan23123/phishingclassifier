@@ -8,19 +8,26 @@ For each Kaggle source S:
 This is the honest generalization estimate — each source is scored by a
 model that never saw it. Writes reports/output/holdout_report.json.
 """
+
 import json
 import time
 from pathlib import Path
 
 from phishingclassifier.csv_adapter import (
-    iter_csv_rows, row_label, row_to_parsed,
+    iter_csv_rows,
+    row_label,
+    row_to_parsed,
 )
 from phishingclassifier.ml import train_from_rows
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 SOURCES = [
-    "CEAS_08.csv", "Enron.csv", "Ling.csv", "Nazario.csv",
-    "Nigerian_Fraud.csv", "SpamAssasin.csv",
+    "CEAS_08.csv",
+    "Enron.csv",
+    "Ling.csv",
+    "Nazario.csv",
+    "Nigerian_Fraud.csv",
+    "SpamAssasin.csv",
 ]
 # phishing_email.csv is a blended superset of the others — excluded from
 # the leave-one-out set to avoid trivially overlapping train/eval.
@@ -38,12 +45,14 @@ def load_source(name: str, cap: int = 3000):
         body = (row.get("body") or row.get("text_combined") or "").strip()
         if not body or len(body) > 20000:
             continue
-        out.append({
-            "row": row,
-            "parsed": row_to_parsed(row, source=f"{name}#row{i+1}"),
-            "label": label,
-            "source": f"{name}#row{i+1}",
-        })
+        out.append(
+            {
+                "row": row,
+                "parsed": row_to_parsed(row, source=f"{name}#row{i + 1}"),
+                "label": label,
+                "source": f"{name}#row{i + 1}",
+            }
+        )
         if len(out) >= cap:
             break
     return out
@@ -64,13 +73,13 @@ def main() -> None:
                 (phish if r["label"] == 1 else legit).append(r)
         take = min(PER_CLASS, len(phish), len(legit))
         import random
+
         rng = random.Random(42)
         rng.shuffle(phish)
         rng.shuffle(legit)
         train_rows = phish[:take] + legit[:take]
         rng.shuffle(train_rows)
-        print(f"train rows: {len(train_rows)} "
-              f"(from {len(files)} sources, {held_out} excluded)")
+        print(f"train rows: {len(train_rows)} (from {len(files)} sources, {held_out} excluded)")
         metrics = train_from_rows(train_rows)
         print(f"  train CV F1: {metrics['cv_f1_macro_mean']:.3f}")
 
@@ -101,9 +110,11 @@ def main() -> None:
             "train_cv_f1": round(metrics["cv_f1_macro_mean"], 4),
         }
         report[held_out] = s
-        print(f"  HELD-OUT {held_out}: acc={s['accuracy']:.1%} "
-              f"prec={s['precision']:.1%} rec={s['recall']:.1%} "
-              f"f1={s['f1']:.1%} ({s['eval_rows']} rows)")
+        print(
+            f"  HELD-OUT {held_out}: acc={s['accuracy']:.1%} "
+            f"prec={s['precision']:.1%} rec={s['recall']:.1%} "
+            f"f1={s['f1']:.1%} ({s['eval_rows']} rows)"
+        )
 
     Path("reports/output").mkdir(parents=True, exist_ok=True)
     out = Path("reports/output/holdout_report.json")

@@ -6,8 +6,12 @@ from pathlib import Path
 from phishingclassifier.heuristics import analyze_signals
 from phishingclassifier.parser import parse_eml_bytes
 from phishingclassifier.report import (
-    batch_json, build_result, html_summary, markdown_report,
-    write_html, write_markdown,
+    batch_json,
+    build_result,
+    html_summary,
+    markdown_report,
+    write_html,
+    write_markdown,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -26,28 +30,30 @@ def _result_from_bytes(raw, source="(test)"):
 def test_markdown_report_renders_all_sections():
     md = markdown_report(_result("spoofed.eml"))
     assert md.startswith("# Phishing Classifier Report")
-    for heading in ("## Headers of interest", "## Fired signals",
-                    "## IOCs", "## Enrichment"):
+    for heading in ("## Headers of interest", "## Fired signals", "## IOCs", "## Enrichment"):
         assert heading in md
     assert "[LIKELY MALICIOUS]" in md or "[MALICIOUS]" in md
 
 
 def test_markdown_report_no_signals_shows_placeholder():
-    raw = (b"Subject: hello there friend\r\nFrom: nobody@example.com\r\n"
-           b"\r\nNothing to see here.\r\n")
+    raw = b"Subject: hello there friend\r\nFrom: nobody@example.com\r\n\r\nNothing to see here.\r\n"
     result = _result_from_bytes(raw)
     result["signals"] = []
-    result["score"] = {"score": 0, "verdict": "Clean", "capped": False,
-                       "signal_count": 0, "top_signals": [],
-                       "raw_weight_total": 0}
+    result["score"] = {
+        "score": 0,
+        "verdict": "Clean",
+        "capped": False,
+        "signal_count": 0,
+        "top_signals": [],
+        "raw_weight_total": 0,
+    }
     md = markdown_report(result)
     assert "No detection signals fired." in md
 
 
 def test_markdown_report_surfaces_enrichment_errors():
     result = _result("clean.eml")
-    result["enrichment"] = {"mode": "live", "lookups": [],
-                            "errors": ["network error: Timeout"]}
+    result["enrichment"] = {"mode": "live", "lookups": [], "errors": ["network error: Timeout"]}
     md = markdown_report(result)
     assert "Errors:" in md
     assert "network error: Timeout" in md
@@ -85,6 +91,7 @@ def test_write_markdown_and_html_to_disk(tmp_path):
 
 def test_batch_json_includes_version_and_count():
     import phishingclassifier
+
     payload = json.loads(batch_json([_result("clean.eml")]))
     assert payload["tool"] == "phishingclassifier"
     assert payload["version"] == phishingclassifier.__version__

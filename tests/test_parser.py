@@ -65,8 +65,7 @@ def test_malformed_file_never_crashes():
 
 
 def test_email_without_body_parses_cleanly():
-    raw = (b"Subject: subject only, no body\r\n"
-           b"From: someone@example.com\r\n\r\n")
+    raw = b"Subject: subject only, no body\r\nFrom: someone@example.com\r\n\r\n"
     parsed = parse_eml_bytes(raw, source_path="(no-body)")
     assert parsed.subject == "subject only, no body"
     assert parsed.from_domain == "example.com"

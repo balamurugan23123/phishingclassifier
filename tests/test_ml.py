@@ -52,8 +52,8 @@ def test_build_norm_table_is_populated_and_cached():
         ("paypal", "paypal", 2, 0),
         ("paypal", "paypa1", 2, 1),
         ("paypal", "paypa", 2, 1),
-        ("kitten", "sitting", 2, 3),   # real distance 3 > cap -> cap+1
-        ("abcdef", "xyz", 2, 3),        # length diff > cap -> cap+1
+        ("kitten", "sitting", 2, 3),  # real distance 3 > cap -> cap+1
+        ("abcdef", "xyz", 2, 3),  # length diff > cap -> cap+1
     ],
 )
 def test_levenshtein(a, b, cap, expected):
@@ -115,9 +115,17 @@ def test_engineered_features_have_expected_keys():
     for sid in ml.KNOWN_SIGNAL_IDS:
         assert f"sig_count::{sid}" in feats
         assert f"sig_weight::{sid}" in feats
-    for key in ("rule_score", "signal_total", "url_count", "domain_count",
-                "auth_spf_fail", "has_auth_header", "body_len",
-                "attachment_count", "sender_digits_ratio"):
+    for key in (
+        "rule_score",
+        "signal_total",
+        "url_count",
+        "domain_count",
+        "auth_spf_fail",
+        "has_auth_header",
+        "body_len",
+        "attachment_count",
+        "sender_digits_ratio",
+    ):
         assert key in feats
     assert all(isinstance(v, float) for v in feats.values())
 
@@ -126,8 +134,7 @@ def test_engineered_features_counts_match_signals():
     parsed, analysis = _analysis("spoofed.eml")
     feats = ml._engineered_features(parsed, analysis["signals"], analysis["iocs"])
     # rule_score equals the sum of signal weights
-    assert feats["rule_score"] == float(
-        sum(s.get("weight", 0) for s in analysis["signals"]))
+    assert feats["rule_score"] == float(sum(s.get("weight", 0) for s in analysis["signals"]))
     assert feats["signal_total"] == float(len(analysis["signals"]))
     assert feats["signal_total"] > 0
 
@@ -222,8 +229,12 @@ class _FakeClf:
 
 
 def _patch_bundle(monkeypatch, prob_phish, scaler=None):
-    bundle = {"vec": _FakeVec(), "tfidf": _FakeTfidf(),
-              "clf": _FakeClf(prob_phish), "kind": "ml-fake"}
+    bundle = {
+        "vec": _FakeVec(),
+        "tfidf": _FakeTfidf(),
+        "clf": _FakeClf(prob_phish),
+        "kind": "ml-fake",
+    }
     if scaler is not None:
         bundle["scaler"] = scaler
     monkeypatch.setattr(ml, "load_model", lambda: bundle)

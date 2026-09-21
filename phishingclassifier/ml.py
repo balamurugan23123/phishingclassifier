@@ -25,20 +25,46 @@ SMALL_DATA_ROWS = 200
 DENSE_MAX_ROWS = 25000
 
 KNOWN_SIGNAL_IDS = [
-    "spf_fail", "dkim_fail", "dmarc_fail", "auth_header_absent",
-    "auth_none", "return_path_mismatch", "reply_to_mismatch",
-    "display_name_spoof", "message_id_absent", "date_future", "date_stale",
-    "origin_ip_internal", "url_ip_literal", "url_punycode",
-    "url_shortener", "url_nonstandard_port", "url_deep_subdomains",
-    "lookalike_domain", "domain_high_entropy", "link_text_mismatch",
-    "credential_form", "dangerous_attachment", "passworded_archive",
-    "urgency_keywords", "money_scam_language", "spam_sales_language",
-    "free_webmail_impersonation", "generic_greeting", "link_count_high",
-    "base64_blob", "lure_signal_correlation", "brand_lookalike_fuzzy",
-    "vt_malicious_verdict", "urlscan_malicious_verdict",
-    "webmail_brand_impersonation", "reply_to_identity_divergence",
-    "advance_fee_structure", "irreversible_payment_request",
-    "windfall_claim", "credential_lure_language",
+    "spf_fail",
+    "dkim_fail",
+    "dmarc_fail",
+    "auth_header_absent",
+    "auth_none",
+    "return_path_mismatch",
+    "reply_to_mismatch",
+    "display_name_spoof",
+    "message_id_absent",
+    "date_future",
+    "date_stale",
+    "origin_ip_internal",
+    "url_ip_literal",
+    "url_punycode",
+    "url_shortener",
+    "url_nonstandard_port",
+    "url_deep_subdomains",
+    "lookalike_domain",
+    "domain_high_entropy",
+    "link_text_mismatch",
+    "credential_form",
+    "dangerous_attachment",
+    "passworded_archive",
+    "urgency_keywords",
+    "money_scam_language",
+    "spam_sales_language",
+    "free_webmail_impersonation",
+    "generic_greeting",
+    "link_count_high",
+    "base64_blob",
+    "lure_signal_correlation",
+    "brand_lookalike_fuzzy",
+    "vt_malicious_verdict",
+    "urlscan_malicious_verdict",
+    "webmail_brand_impersonation",
+    "reply_to_identity_divergence",
+    "advance_fee_structure",
+    "irreversible_payment_request",
+    "windfall_claim",
+    "credential_lure_language",
 ]
 
 _MODEL_CACHE: Dict[str, Any] = {}
@@ -46,9 +72,20 @@ _NORM_TABLE: Dict[str, str] = {}
 
 # character substitutions
 _LEET_MAP = {
-    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
-    "8": "b", "9": "g", "@": "a", "$": "s", "!": "i",
-    "|": "l", "€": "e", "£": "l",
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+    "@": "a",
+    "$": "s",
+    "!": "i",
+    "|": "l",
+    "€": "e",
+    "£": "l",
 }
 
 
@@ -57,10 +94,28 @@ def build_norm_table() -> Dict[str, str]:
         return _NORM_TABLE
     table: Dict[str, str] = dict(_LEET_MAP)
     extra = {
-        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
-        "у": "y", "ѕ": "s", "і": "i", "ј": "j", "һ": "h", "ԁ": "d",
-        "ο": "o", "α": "a", "ε": "e", "ι": "i", "κ": "k", "ρ": "p",
-        "ϲ": "c", "ν": "v", "τ": "t", "υ": "u",
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "у": "y",
+        "ѕ": "s",
+        "і": "i",
+        "ј": "j",
+        "һ": "h",
+        "ԁ": "d",
+        "ο": "o",
+        "α": "a",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "ρ": "p",
+        "ϲ": "c",
+        "ν": "v",
+        "τ": "t",
+        "υ": "u",
     }
     table.update(extra)
     _NORM_TABLE.update(table)
@@ -100,8 +155,9 @@ def levenshtein(a: str, b: str, cap: int = 2) -> int:
     return prev[-1]
 
 
-def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
-                    max_distance: int = 2) -> Optional[str]:
+def fuzzy_brand_hit(
+    host: str, brands: Optional[Dict[str, list]] = None, max_distance: int = 2
+) -> Optional[str]:
     """Return the brand token if host is a near-miss of a known brand.
 
     Checks each dot/hyphen-separated label of the host (normalized for
@@ -122,17 +178,32 @@ def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
             dl = d.lower()
             if host_l == dl or host_l.endswith("." + dl):
                 return None
-    generic = {"www", "mail", "login", "secure", "verify", "account",
-              "accounts", "portal", "auth", "id", "support", "signin",
-              "email", "webmail", "smtp", "imap", "mx"}
+    generic = {
+        "www",
+        "mail",
+        "login",
+        "secure",
+        "verify",
+        "account",
+        "accounts",
+        "portal",
+        "auth",
+        "id",
+        "support",
+        "signin",
+        "email",
+        "webmail",
+        "smtp",
+        "imap",
+        "mx",
+    }
     labels = re.split(r"[.\-]+", host_l)
     for label in labels:
         if not label or len(label) < 4 or label in generic:
             continue
         norm = normalize_confusables(label)
         for brand, legit in brands.items():
-            refs = {brand, normalize_confusables(
-                legit[0].split(".")[0])}
+            refs = {brand, normalize_confusables(legit[0].split(".")[0])}
             for ref in refs:
                 if len(ref) >= 4 and levenshtein(norm, ref, max_distance) <= max_distance:
                     return brand
@@ -143,13 +214,18 @@ def _text_for_tfidf(parsed) -> str:
     import re as _re
 
     html = _re.sub(r"<[^>]+>", " ", parsed.html_body or "")
-    return " ".join([
-        parsed.subject or "", parsed.text_body or "", html,
-    ])
+    return " ".join(
+        [
+            parsed.subject or "",
+            parsed.text_body or "",
+            html,
+        ]
+    )
 
 
-def _engineered_features(parsed, signals: List[Dict[str, Any]],
-                         iocs: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
+def _engineered_features(
+    parsed, signals: List[Dict[str, Any]], iocs: Optional[Dict[str, Any]] = None
+) -> Dict[str, float]:
     feats: Dict[str, float] = {}
     sig_counts: Dict[str, int] = {}
     weight_by_id: Dict[str, int] = {}
@@ -162,10 +238,18 @@ def _engineered_features(parsed, signals: List[Dict[str, Any]],
 
     feats["rule_score"] = float(sum(s.get("weight", 0) for s in signals))
     feats["signal_total"] = float(len(signals))
-    feats["url_count"] = float(len((iocs or {}).get("urls", {}).get("body", [])
-                                   + (iocs or {}).get("urls", {}).get("header", [])))
-    feats["domain_count"] = float(len((iocs or {}).get("domains", {}).get("body", [])
-                                       + (iocs or {}).get("domains", {}).get("header", [])))
+    feats["url_count"] = float(
+        len(
+            (iocs or {}).get("urls", {}).get("body", [])
+            + (iocs or {}).get("urls", {}).get("header", [])
+        )
+    )
+    feats["domain_count"] = float(
+        len(
+            (iocs or {}).get("domains", {}).get("body", [])
+            + (iocs or {}).get("domains", {}).get("header", [])
+        )
+    )
     feats["auth_spf_fail"] = 1.0 if (parsed.auth("spf") in ("fail", "softfail")) else 0.0
     feats["auth_dkim_fail"] = 1.0 if (parsed.auth("dkim") in ("fail", "softfail")) else 0.0
     feats["auth_dmarc_fail"] = 1.0 if (parsed.auth("dmarc") in ("fail", "softfail")) else 0.0
@@ -175,8 +259,7 @@ def _engineered_features(parsed, signals: List[Dict[str, Any]],
     feats["from_csv_row"] = 1.0 if getattr(parsed, "from_csv", False) else 0.0
     sender_dom = (parsed.from_domain or "").lower()
     feats["sender_digits_ratio"] = (
-        sum(c.isdigit() for c in sender_dom) / len(sender_dom)
-        if sender_dom else 0.0
+        sum(c.isdigit() for c in sender_dom) / len(sender_dom) if sender_dom else 0.0
     )
     feats["sender_hyphens"] = float(sender_dom.count("-"))
     return feats
@@ -242,8 +325,7 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     labeled = [r for r in rows if r.get("label") in (0, 1)]
     if len(labeled) < 10:
-        raise ValueError("Need >= 10 labeled rows to train (have %d)"
-                          % len(labeled))
+        raise ValueError("Need >= 10 labeled rows to train (have %d)" % len(labeled))
     classes = {r["label"] for r in labeled}
     if classes != {0, 1}:
         raise ValueError("Both classes (0 and 1) required; got %s" % classes)
@@ -262,9 +344,13 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     vec = DictVectorizer(sparse=False)
     tfidf = TfidfVectorizer(
-        analyzer="char_wb", ngram_range=CHAR_NGRAM_RANGE,
-        max_features=MAX_TFIDF_FEATURES, sublinear_tf=True,
-        strip_accents="unicode", min_df=2, lowercase=True,
+        analyzer="char_wb",
+        ngram_range=CHAR_NGRAM_RANGE,
+        max_features=MAX_TFIDF_FEATURES,
+        sublinear_tf=True,
+        strip_accents="unicode",
+        min_df=2,
+        lowercase=True,
     )
     F = vec.fit_transform(X_feats)
     T = tfidf.fit_transform(X_text)
@@ -279,7 +365,9 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         X = X.toarray()  # tiny data: dense is trivially cheap
     elif n <= DENSE_MAX_ROWS:
         clf = HistGradientBoostingClassifier(
-            max_iter=200, learning_rate=0.1, random_state=42,
+            max_iter=200,
+            learning_rate=0.1,
+            random_state=42,
         )
         model_kind = "ml-gbdt"
         X = X.toarray()  # GBDT needs dense; fits RAM at this scale
@@ -289,8 +377,7 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         # saga needs iterations at 6.6k features; 10k converges for real.
         scaler = MaxAbsScaler()
         X = scaler.fit_transform(X)
-        clf = LogisticRegression(max_iter=10000, C=1.0, random_state=42,
-                                 solver="saga", tol=1e-4)
+        clf = LogisticRegression(max_iter=10000, C=1.0, random_state=42, solver="saga", tol=1e-4)
         model_kind = "ml-logreg-saga"
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -323,16 +410,13 @@ def classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, fl
     yp = np.asarray(y_pred)
     return {
         "accuracy": round(float((yp == yt).mean()), 4),
-        "precision": round(float(precision_score(
-            yt, yp, zero_division=0)), 4),
-        "recall": round(float(recall_score(
-            yt, yp, zero_division=0)), 4),
+        "precision": round(float(precision_score(yt, yp, zero_division=0)), 4),
+        "recall": round(float(recall_score(yt, yp, zero_division=0)), 4),
         "f1": round(float(f1_score(yt, yp, zero_division=0)), 4),
     }
 
 
-def evaluate_on_datasets(paths: List[str],
-                          max_rows_per_source: int = 0) -> Dict[str, Any]:
+def evaluate_on_datasets(paths: List[str], max_rows_per_source: int = 0) -> Dict[str, Any]:
     """Evaluate the DEPLOYED model on held-out datasets — no refitting.
 
     This is the honesty check: the model on disk (the one the CLI and
@@ -375,8 +459,7 @@ def evaluate_on_datasets(paths: List[str],
             p_phish = float(proba[idx])
             y.append(r["label"])
             p.append(1 if p_phish >= 0.5 else 0)
-        per_source[Path(path).name] = {"rows": len(y),
-                                         **classification_metrics(y, p)}
+        per_source[Path(path).name] = {"rows": len(y), **classification_metrics(y, p)}
         all_y.extend(y)
         all_p.extend(p)
 
@@ -384,8 +467,9 @@ def evaluate_on_datasets(paths: List[str],
     return {"overall": overall, "per_source": per_source}
 
 
-def classify(parsed, signals: List[Dict[str, Any]],
-             iocs: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def classify(
+    parsed, signals: List[Dict[str, Any]], iocs: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
     """Second-opinion ML verdict for one email; None when no model.
 
     Returns {probability_phishing, prediction, model} — the rule engine
