@@ -16,6 +16,12 @@ SENDER_KEYS = ["sender", "Sender", "from", "From", "email_from", "from_addr"]
 LABEL_KEYS = ["label", "Label", "class", "Class", "type", "target",
               "label_num", "spam"]
 
+# Upper bound on a single CSV cell, in bytes. The default csv module limit is
+# ~128KB (too small for email bodies), but sys.maxsize is effectively unlimited
+# and lets a pathological cell exhaust memory -- and it overflows the C long on
+# some platforms. 10 MiB comfortably clears any real email while capping DoS.
+MAX_FIELD_BYTES = 10 * 1024 * 1024
+
 
 def _pick(row: Dict[str, str], keys: List[str]) -> str:
     for key in keys:
@@ -65,10 +71,8 @@ def row_label(row: Dict[str, str]) -> Optional[int]:
 
 
 def iter_csv_rows(path: str) -> Iterable[Dict[str, str]]:
-    """Yield rows from CSV file (handles very large fields)."""
-    import sys
-
-    csv.field_size_limit(sys.maxsize)
+    """Yield rows from CSV file (handles very large, but bounded, fields)."""
+    csv.field_size_limit(MAX_FIELD_BYTES)
     p = Path(path)
     with open(p, "r", encoding="utf-8", errors="replace", newline="") as fh:
         reader = csv.DictReader(fh)

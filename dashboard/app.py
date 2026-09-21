@@ -46,6 +46,11 @@ RAIL_COLOR = {
 }
 RAIL_INK = "#0b0f12"
 
+# Pasted/uploaded emails are parsed in memory; cap their size so a single
+# giant input can't exhaust the server. Real raw emails are tens-to-hundreds
+# of KB; 5 MiB leaves ample headroom while bounding worst-case memory.
+MAX_INPUT_BYTES = 5 * 1024 * 1024
+
 CSS = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -623,6 +628,11 @@ full per-corpus breakdown and known blind spots.</div>
         if st.button("Analyze pasted email", type="primary"):
             if not pasted.strip():
                 st.error("Paste an email first — nothing to analyze.")
+            elif len(pasted.encode("utf-8", errors="replace")) > MAX_INPUT_BYTES:
+                st.error(
+                    f"That email is larger than the "
+                    f"{MAX_INPUT_BYTES // (1024 * 1024)} MiB limit. "
+                    "Trim it or analyze the file with the command-line tool.")
             else:
                 _render_cases([_analyze_bytes(
                     pasted.encode("utf-8", errors="replace"),
@@ -641,10 +651,18 @@ full per-corpus breakdown and known blind spots.</div>
             accept_multiple_files=True,
         )
         if uploads:
-            _render_cases([
-                _analyze_bytes(up.getvalue(), source=up.name)
-                for up in uploads
-            ], export_key="upload")
+            oversized = [up.name for up in uploads
+                         if up.size > MAX_INPUT_BYTES]
+            for name in oversized:
+                st.warning(
+                    f"Skipped {name}: larger than the "
+                    f"{MAX_INPUT_BYTES // (1024 * 1024)} MiB limit.")
+            accepted = [up for up in uploads if up.size <= MAX_INPUT_BYTES]
+            if accepted:
+                _render_cases([
+                    _analyze_bytes(up.getvalue(), source=up.name)
+                    for up in accepted
+                ], export_key="upload")
 
     with tab_batch:
         st.markdown(
