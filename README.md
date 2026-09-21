@@ -2,8 +2,10 @@
 
 A phishing email investigation tool: parses raw `.eml` emails, extracts IOCs,
 scores phishing risk with explainable heuristics, and produces analyst-ready
-Markdown, HTML, and JSON reports — plus a Streamlit analyst dashboard. Also
-validates heuristics against labeled CSV datasets.
+Markdown, HTML, and JSON reports — plus a Streamlit analyst dashboard. IOCs can
+be exported as STIX 2.1 bundles or MISP events for TIP/SOC ingestion, and
+optionally enriched against VirusTotal, urlscan.io, and Google Safe Browsing.
+Also validates heuristics against labeled CSV datasets.
 
 ## Quick start
 
@@ -16,11 +18,19 @@ pip install -e .[dev]
 phishsleuth analyze tests/fixtures \
     --json reports/output/results.json --html reports/output/summary.html
 
+# Export IOCs as STIX 2.1 / MISP for a TIP/SOC, and opt-in deep-scan Office
+# attachments for embedded VBA macros:
+phishsleuth analyze tests/fixtures --offline \
+    --stix reports/output/iocs.stix2.json --misp reports/output/iocs.misp.json \
+    --deep-attachments
+
 # Dashboard (Streamlit)
 streamlit run dashboard/app.py -- --json reports/output/results.json
 
-# Validate heuristics against a labeled CSV dataset
-phishsleuth validate samples/labeled_sample.csv --show-misses
+# Validate heuristics against a labeled CSV dataset; --threshold tunes the
+# phishing decision cut-off (default 50) to trade false positives against
+# false negatives
+phishsleuth validate samples/labeled_sample.csv --show-misses --threshold 40
 
 # Train the ML second-opinion model on a labeled corpus
 phishsleuth train samples --per-class 5000
@@ -40,6 +50,11 @@ phishsleuth evaluate <holdout1.csv> <holdout2.csv>
   impersonation, money-scam language, spam/sales language, generic greetings,
   excessive link count, irreversible-payment requests, windfall claims,
   credential-lure phrasing, and composite lure-signal correlation bonus.
+- Header/behavioral: mailer fingerprint (X-Mailer/User-Agent revealing scripted
+  or bulk senders), fabricated reply-thread (a "Re:" subject with no
+  In-Reply-To/References), and Received-chain analysis (a missing chain or
+  non-monotonic/backdated hop timestamps). Urgency detection is multilingual
+  (ES/FR/DE/PT/IT) and homoglyph/leet-normalized.
 
 ## ML model — honest performance numbers
 
@@ -111,3 +126,8 @@ Result on `samples/labeled_sample.csv` (20 handcrafted rows):
   GitHub Actions CI (lint/format/type/test/secret-scan/dep-audit), test suite
   37→100, cache TTL + concurrent enrichment, `logging` diagnostics, DRY +
   input-size caps, dashboard opsec (no remote fonts) + per-file error handling
+- `v0.8` analyst features: configurable `--threshold`, STIX 2.1 + MISP IOC
+  export, opt-in Office attachment macro scanning (`--deep-attachments`,
+  optional `oletools`), new heuristics (mailer fingerprint, fabricated
+  reply-thread, Received-chain analysis, multilingual urgency), and optional
+  Google Safe Browsing enrichment
