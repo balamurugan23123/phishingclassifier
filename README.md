@@ -8,23 +8,25 @@ validates heuristics against labeled CSV datasets.
 ## Quick start
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+# Install the package (editable) + its dependencies and dev tools.
+pip install -e .[dev]
 
-# Analyze .eml files (single file or folder)
-python -m phishingclassifier.cli analyze tests/fixtures \
+# Analyze .eml files (single file or folder). `phishsleuth` is the
+# installed console command; `python -m phishingclassifier.cli` is equivalent.
+phishsleuth analyze tests/fixtures \
     --json reports/output/results.json --html reports/output/summary.html
 
 # Dashboard (Streamlit)
 streamlit run dashboard/app.py -- --json reports/output/results.json
 
 # Validate heuristics against a labeled CSV dataset
-python -m phishingclassifier.cli validate samples/labeled_sample.csv --show-misses
+phishsleuth validate samples/labeled_sample.csv --show-misses
 
 # Train the ML second-opinion model on a labeled corpus
-python -m phishingclassifier.cli train samples --per-class 5000
+phishsleuth train samples --per-class 5000
 
 # Score the deployed model on datasets it has NEVER seen
-python -m phishingclassifier.cli evaluate <holdout1.csv> <holdout2.csv>
+phishsleuth evaluate <holdout1.csv> <holdout2.csv>
 ```
 
 ## Detection heuristics

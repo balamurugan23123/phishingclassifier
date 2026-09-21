@@ -9,11 +9,8 @@ This is the honest generalization estimate — each source is scored by a
 model that never saw it. Writes reports/output/holdout_report.json.
 """
 import json
-import sys
 import time
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from phishingclassifier.csv_adapter import (
     iter_csv_rows, row_label, row_to_parsed,
