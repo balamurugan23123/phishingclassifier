@@ -103,7 +103,11 @@ Result on `samples/labeled_sample.csv` (20 handcrafted rows):
 - `v0.3` scoring engine + Markdown/JSON reports + batch mode
 - `v0.4` hybrid enrichment + HTML summary + validation stats
 - `v0.5` Streamlit analyst dashboard
-- `v0.6` CSV dataset adapter + labeled validation + DGA entropy detection
 - `v0.5.1` dashboard redesign
 - `v0.5.2` dashboard input modes + dark theme + integrations status
+- `v0.6` CSV dataset adapter + labeled validation + DGA entropy detection
 - `v0.7` ML second opinion + honest leave-one-corpus-out validation
+- `v0.7.1` engineering hardening: editable-install packaging + console script,
+  GitHub Actions CI (lint/format/type/test/secret-scan/dep-audit), test suite
+  37→100, cache TTL + concurrent enrichment, `logging` diagnostics, DRY +
+  input-size caps, dashboard opsec (no remote fonts) + per-file error handling
