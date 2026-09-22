@@ -1,8 +1,16 @@
 """Heuristic scoring tests."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
-from phishingclassifier.heuristics import analyze_signals
+from phishingclassifier.heuristics import (
+    _check_mailer,
+    _check_received_chain,
+    _check_reply_chain,
+    _check_urgency,
+    _haystack,
+    analyze_signals,
+)
 from phishingclassifier.parser import parse_eml
 from phishingclassifier.report import batch_json, build_result, markdown_report
 from phishingclassifier.scoring import score_result, verdict_for
@@ -110,6 +118,130 @@ def test_batch_json_sorts_by_score():
     payload = batch_json(results)
     assert '"count": 3' in payload
     import json
+
     data = json.loads(payload)
     scores = [r["score"]["score"] for r in data["results"]]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_haystack_is_memoized_and_invalidates_on_change():
+    parsed = parse_eml(str(FIXTURES / "spoofed.eml"))
+    first = _haystack(parsed)
+    # repeated calls return the identical cached object (no recompute)
+    assert _haystack(parsed) is first
+    # mutating a source field must invalidate the cache
+    parsed.subject = "Totally Different Subject XYZZY"
+    second = _haystack(parsed)
+    assert second is not first
+    assert "totally different subject" in second
+
+
+def _mailer_signals(headers):
+    signals = []
+    _check_mailer(SimpleNamespace(headers=headers), signals)
+    return signals
+
+
+def test_mailer_flags_scripted_user_agent():
+    s = _mailer_signals({"user-agent": "python-requests/2.31.0"})
+    assert [x["id"] for x in s] == ["suspicious_mailer"]
+
+
+def test_mailer_flags_bulk_xmailer():
+    s = _mailer_signals({"x-mailer": "Mass Mailer Pro 3.0"})
+    assert s and s[0]["id"] == "suspicious_mailer"
+
+
+def test_mailer_ignores_normal_clients():
+    assert (
+        _mailer_signals(
+            {
+                "x-mailer": "Microsoft Outlook 16",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            }
+        )
+        == []
+    )
+
+
+def test_mailer_absent_header_is_not_flagged():
+    assert _mailer_signals({}) == []
+
+
+def _reply_signals(subject, headers):
+    signals = []
+    _check_reply_chain(SimpleNamespace(subject=subject, headers=headers), signals)
+    return signals
+
+
+def test_reply_chain_flags_fabricated_thread():
+    s = _reply_signals("Re: your invoice", {})
+    assert [x["id"] for x in s] == ["fake_reply_thread"]
+
+
+def test_reply_chain_allows_genuine_reply():
+    assert _reply_signals("Re: your invoice", {"in-reply-to": "<a@x.com>"}) == []
+    assert _reply_signals("Re: your invoice", {"references": "<a@x.com>"}) == []
+
+
+def test_reply_chain_ignores_non_reply_subject():
+    assert _reply_signals("Your weekly summary", {}) == []
+
+
+def _received_signals(hops):
+    signals = []
+    _check_received_chain(SimpleNamespace(received_chain=hops), signals)
+    return signals
+
+
+def test_received_absent_chain_flagged():
+    s = _received_signals([])
+    assert [x["id"] for x in s] == ["received_chain_absent"]
+
+
+def test_received_monotonic_chain_is_clean():
+    hops = [
+        "from mta1 (x) by dest.example.com; Fri, 05 Jan 2024 12:00:00 +0000",
+        "from origin (y) by relay.example.com; Fri, 05 Jan 2024 11:00:00 +0000",
+    ]
+    assert _received_signals(hops) == []
+
+
+def test_received_backdated_chain_flagged():
+    hops = [
+        "from mta1 by dest.example.com; Mon, 01 Jan 2024 00:00:00 +0000",
+        "from origin by relay.example.com; Fri, 05 Jan 2024 00:00:00 +0000",
+    ]
+    s = _received_signals(hops)
+    assert [x["id"] for x in s] == ["received_timestamp_backdated"]
+
+
+def test_received_unparseable_dates_are_ignored():
+    assert _received_signals(["from a by b; nope", "from c by d; also nope"]) == []
+
+
+def _urgency_signals(subject="", text="", html=""):
+    parsed = SimpleNamespace(subject=subject, text_body=text, html_body=html)
+    signals = []
+    _check_urgency(parsed, signals)
+    return signals
+
+
+def test_urgency_matches_multilingual_phrases():
+    s = _urgency_signals(
+        subject="Acci\u00f3n requerida",
+        text="Por favor verifique su cuenta de inmediato.",
+    )
+    assert [x["id"] for x in s] == ["urgency_keywords"]
+    ev = s[0]["evidence"]
+    assert "verifique su cuenta" in ev
+    assert "[es]" in ev
+
+
+def test_urgency_still_matches_english():
+    s = _urgency_signals(text="Please verify your account immediately")
+    assert any(x["id"] == "urgency_keywords" for x in s)
+
+
+def test_urgency_clean_text_fires_nothing():
+    assert _urgency_signals(text="Here is the quarterly report you asked for. Thanks!") == []

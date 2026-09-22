@@ -3,37 +3,82 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 5.0
 READ_TIMEOUT = 15.0
 VT_BASE = "https://www.virustotal.com/api/v3"
 VT_MIN_INTERVAL = 15.5
 URLSCAN_BASE = "https://urlscan.io/api/v1"
+# urlscan.io is a separate service from VirusTotal, so its lookups are not
+# bound by VT's 4-requests-per-minute budget. We run them on a small bounded
+# pool so their network I/O overlaps VT's mandatory cooldown instead of
+# blocking inline.
+URLSCAN_MAX_WORKERS = 5
+
+# Google Safe Browsing Lookup API v4. A third, independent service with its
+# own quota; it accepts a batch of URLs in a single request, so we make at
+# most one call per email instead of one per IOC.
+SB_BASE = "https://safebrowsing.googleapis.com/v4/threatMatches:match"
+MAX_SB_URLS = 50
+
+# Threat intelligence goes stale: a domain that is clean today may be
+# weaponized tomorrow. Cached verdicts expire after this many seconds so a
+# returning analyst is not fed outdated signals. Override via the
+# VT_CACHE_TTL env var (seconds; 0 disables caching entirely).
+DEFAULT_CACHE_TTL = 24 * 3600
 
 _CACHE_SUBDIR = "cache"
 _CACHE_FILE = "vt_cache.json"
 
 
+def _client_version() -> str:
+    import phishingclassifier
+
+    return phishingclassifier.__version__
+
+
 class EnrichmentState:
     """Tracks API keys, cache, and rate limiting."""
 
-    def __init__(self, offline: bool = False, workdir: str = ".") -> None:
+    def __init__(
+        self, offline: bool = False, workdir: str = ".", cache_ttl: Optional[int] = None
+    ) -> None:
         self.offline = offline
         self.cache_path = Path(workdir) / _CACHE_SUBDIR / _CACHE_FILE
+        self.cache_ttl = self._resolve_ttl(cache_ttl)
         self.vt_key: Optional[str] = None
         self.urlscan_key: Optional[str] = None
+        self.google_key: Optional[str] = None
         self._cache: Dict[str, Any] = {}
         self._last_vt_request = 0.0
+        self._lock = threading.RLock()
         self.requests_made = 0
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.cache_expired = 0
         self.errors: List[str] = []
         self._load_keys(workdir)
-        if self.vt_key or self.urlscan_key:
+        if self.vt_key or self.urlscan_key or self.google_key:
             self._load_cache()
+
+    @staticmethod
+    def _resolve_ttl(cache_ttl: Optional[int]) -> int:
+        """Explicit arg wins, then VT_CACHE_TTL env, then the default."""
+        raw = cache_ttl
+        if raw is None:
+            env = os.environ.get("VT_CACHE_TTL", "").strip()
+            raw = int(env) if env.lstrip("+").isdigit() else DEFAULT_CACHE_TTL
+        return max(0, int(raw))
 
     def _load_keys(self, workdir: str = ".") -> None:
         # .env lookup order: explicit workdir (tests pass tmp_path to
@@ -59,6 +104,8 @@ class EnrichmentState:
                         self.vt_key = value
                     elif key == "URLSCAN_API_KEY" and value:
                         self.urlscan_key = value
+                    elif key == "GOOGLE_API_KEY" and value:
+                        self.google_key = value
             except OSError:
                 pass
             break  # first existing .env wins; never stack multiple files
@@ -66,34 +113,64 @@ class EnrichmentState:
         # environment variables take precedence
         env_vt = os.environ.get("VT_API_KEY", "").strip()
         env_us = os.environ.get("URLSCAN_API_KEY", "").strip()
+        env_google = os.environ.get("GOOGLE_API_KEY", "").strip()
         if env_vt:
             self.vt_key = env_vt
         if env_us:
             self.urlscan_key = env_us
+        if env_google:
+            self.google_key = env_google
         if self.offline:
             self.vt_key = None
             self.urlscan_key = None
+            self.google_key = None
 
     @property
     def enabled(self) -> bool:
-        return bool(self.vt_key or self.urlscan_key)
+        return bool(self.vt_key or self.urlscan_key or self.google_key)
 
     def _load_cache(self) -> None:
         try:
             if self.cache_path.is_file():
-                self._cache = json.loads(
-                    self.cache_path.read_text(encoding="utf-8")
-                )
+                self._cache = json.loads(self.cache_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            # A corrupt/unreadable cache is recoverable (we start empty),
+            # but silently discarding it can confuse an analyst -- log it.
+            logger.warning(
+                "could not read VT cache %s; starting empty", self.cache_path, exc_info=True
+            )
             self._cache = {}
+        # Drop stale (and legacy, untimed) entries so the cache file cannot
+        # grow without bound and never serves outdated verdicts.
+        if self._prune_expired():
+            self._save_cache()
+
+    def _is_stale(self, entry: Any) -> bool:
+        """True when an entry is missing its envelope or has aged past TTL.
+
+        Legacy entries written before TTL support lack the envelope and are
+        treated as stale on purpose: better to refetch than trust a verdict
+        we cannot date.
+        """
+        if not isinstance(entry, dict) or "at" not in entry or "value" not in entry:
+            return True
+        if self.cache_ttl <= 0:
+            return True
+        return (time.time() - entry["at"]) > self.cache_ttl
+
+    def _prune_expired(self) -> bool:
+        """Remove stale entries; return True if anything was dropped."""
+        dropped = [k for k, v in self._cache.items() if self._is_stale(v)]
+        for k in dropped:
+            self._cache.pop(k, None)
+            self.cache_expired += 1
+        return bool(dropped)
 
     def _save_cache(self) -> None:
-        """Atomic write to cache file."""
+        """Atomic write to cache file (caller holds the lock or init)."""
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(
-                dir=str(self.cache_path.parent), suffix=".tmp"
-            )
+            fd, tmp = tempfile.mkstemp(dir=str(self.cache_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(self._cache, fh, indent=1)
@@ -108,14 +185,24 @@ class EnrichmentState:
             self.errors.append(f"cache write failed: {exc}")
 
     def _cached(self, key: str) -> Optional[Dict[str, Any]]:
-        entry = self._cache.get(key)
-        if isinstance(entry, dict):
-            return entry
-        return None
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                self.cache_misses += 1
+                return None
+            if self._is_stale(entry):
+                self._cache.pop(key, None)
+                self.cache_expired += 1
+                self._save_cache()
+                self.cache_misses += 1
+                return None
+            self.cache_hits += 1
+            return entry["value"]
 
     def _put_cache(self, key: str, value: Dict[str, Any]) -> None:
-        self._cache[key] = value
-        self._save_cache()
+        with self._lock:
+            self._cache[key] = {"at": time.time(), "value": value}
+            self._save_cache()
 
     def _http_get(self, url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """GET request with timeouts and rate-limit backoff."""
@@ -127,7 +214,8 @@ class EnrichmentState:
             return None
         try:
             resp = requests.get(
-                url, headers=headers,
+                url,
+                headers=headers,
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
             self.requests_made += 1
@@ -138,14 +226,13 @@ class EnrichmentState:
                 )
                 time.sleep(max(wait, 0.0))
                 resp = requests.get(
-                    url, headers=headers,
+                    url,
+                    headers=headers,
                     timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                 )
                 self.requests_made += 1
             if resp.status_code != 200:
-                self.errors.append(
-                    f"HTTP {resp.status_code} for {url.split('?')[0]}"
-                )
+                self.errors.append(f"HTTP {resp.status_code} for {url.split('?')[0]}")
                 return None
             return resp.json()
         except requests.RequestException as exc:
@@ -166,9 +253,7 @@ class EnrichmentState:
         if elapsed < VT_MIN_INTERVAL:
             time.sleep(VT_MIN_INTERVAL - elapsed)
         self._last_vt_request = time.monotonic()
-        data = self._http_get(
-            f"{VT_BASE}{path}", {"X-Apikey": self.vt_key}
-        )
+        data = self._http_get(f"{VT_BASE}{path}", {"X-Apikey": self.vt_key})
         if data is not None:
             self._put_cache(key, data)
         return data
@@ -187,6 +272,7 @@ class EnrichmentState:
 
     def vt_url(self, url: str) -> Optional[Dict[str, Any]]:
         import base64
+
         url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
         data = self._vt_get(f"/urls/{url_id}")
         return self._vt_summarize(data, prefix="url") if data else None
@@ -222,7 +308,7 @@ class EnrichmentState:
         try:
             resp = requests.get(
                 f"{URLSCAN_BASE}/search/",
-                params={"q": f"domain:{domain}", "size": 10},
+                params={"q": f"domain:{domain}", "size": 10},  # type: ignore[arg-type]
                 headers={"API-Key": self.urlscan_key},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
@@ -237,10 +323,14 @@ class EnrichmentState:
                 "source": "urlscan",
                 "type": "domain_search",
                 "total_existing_scans": total,
-                "verdicts_seen": sorted({
-                    (r.get("verdicts") or {}).get("overall", "")
-                    for r in results if isinstance(r, dict)
-                } - {""}),
+                "verdicts_seen": sorted(
+                    {
+                        (r.get("verdicts") or {}).get("overall", "")
+                        for r in results
+                        if isinstance(r, dict)
+                    }
+                    - {""}
+                ),
             }
             self._put_cache(key, summary)
             return summary
@@ -251,57 +341,185 @@ class EnrichmentState:
             self.errors.append("urlscan invalid JSON")
             return None
 
+    def _http_post(
+        self, url: str, params: Dict[str, str], payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """POST a JSON body with query params; return parsed JSON or None."""
+        try:
+            import requests
+        except ImportError:
+            self.errors.append("requests not installed -> offline mode")
+            self.offline = True
+            return None
+        try:
+            resp = requests.post(
+                url,
+                params=params,  # type: ignore[arg-type]
+                json=payload,
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+            self.requests_made += 1
+            if resp.status_code != 200:
+                self.errors.append(f"HTTP {resp.status_code} for {url}")
+                return None
+            return resp.json()
+        except requests.RequestException as exc:
+            self.errors.append(f"network error: {type(exc).__name__}")
+            return None
+        except ValueError:
+            self.errors.append("invalid JSON response")
+            return None
 
-def enrich_result(result: Dict[str, Any], state: EnrichmentState,
-                  max_lookups: int = 20) -> Dict[str, Any]:
+    def safebrowsing_lookup(self, urls: List[str]) -> List[Dict[str, Any]]:
+        """Batch-check URLs against Google Safe Browsing in one request.
+
+        Returns a summary dict per *matched* (unsafe) URL only; clean URLs are
+        cached but produce no lookup entry, mirroring urlscan's observed-
+        verdicts style. Results are cached per URL under the ``sb:`` namespace.
+        """
+        if not self.google_key or not urls:
+            return []
+        uncached: List[str] = []
+        out: List[Dict[str, Any]] = []
+        for u in urls:
+            cached = self._cached(f"sb:{u}")
+            if cached is None:
+                uncached.append(u)
+            elif cached.get("malicious"):
+                out.append(cached)
+        if not uncached:
+            return out
+        payload = {
+            "client": {"clientId": "phishsleuth", "clientVersion": _client_version()},
+            "threatInfo": {
+                "threatTypes": [
+                    "MALICIOUS_SOFTWARE",
+                    "SOCIAL_ENGINEERING",
+                    "UNWANTED_SOFTWARE",
+                    "POTENTIALLY_UNWANTED",
+                ],
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [{"url": u} for u in uncached],
+            },
+        }
+        data = self._http_post(SB_BASE, {"key": self.google_key}, payload)
+        if data is None:
+            return out
+        matches: Dict[str, List[str]] = {}
+        for m in data.get("matches", []) or []:
+            threat = m.get("threat") or {}
+            turl = threat.get("url") or (m.get("threatEntry") or {}).get("url")
+            tt = m.get("threatType")
+            if turl and tt:
+                matches.setdefault(turl, []).append(tt)
+        for u in uncached:
+            types = matches.get(u)
+            summary = {
+                "source": "safebrowsing",
+                "type": "url",
+                "ioc": u,
+                "malicious": 1 if types else 0,
+                "threat_types": sorted(set(types)) if types else [],
+            }
+            self._put_cache(f"sb:{u}", summary)
+            if types:
+                out.append(summary)
+        return out
+
+
+def enrich_result(
+    result: Dict[str, Any], state: EnrichmentState, max_lookups: int = 20
+) -> Dict[str, Any]:
     """Enrich IOCs for a single email result."""
     enrichment: Dict[str, Any] = {"mode": "offline", "lookups": [], "errors": []}
     if state.offline or not state.enabled:
         enrichment["mode"] = (
-            "offline (--offline flag)" if state.offline else
-            "offline (no API keys configured)"
+            "offline (--offline flag)" if state.offline else "offline (no API keys configured)"
         )
         return enrichment
 
     enrichment["mode"] = "live"
+
+    # Phase 1: plan the exact set of lookups (identical budget accounting to
+    # the original sequential code) so behavior is unchanged; only the
+    # *timing* differs. Each slot is (kind, payload).
+    plan: List[tuple] = []
     budget = max_lookups
+    origin_ip = result.get("origin_ip")
+    if origin_ip and budget > 0:
+        plan.append(("vt_ip", origin_ip))
+        budget -= 1
+
+    iocs = result.get("iocs") or {}
+    domains = iocs.get("domains", {}).get("header", []) + iocs.get("domains", {}).get("body", [])
+    for domain in dict.fromkeys(domains):
+        if budget <= 0:
+            break
+        plan.append(("vt_domain", domain))
+        budget -= 1
+        if state.urlscan_key and budget > 0:
+            plan.append(("urlscan", domain))
+            budget -= 1
+
+    for att in iocs.get("attachment_hashes", []):
+        if budget <= 0:
+            break
+        plan.append(("vt_hash", att))
+        budget -= 1
+
+    # Phase 2: execute. VirusTotal is rate-limited to ~4 req/min, so its
+    # lookups stay sequential on this thread. urlscan.io is a separate
+    # service, so we fire all its searches on a small pool first; their
+    # network I/O overlaps the VT cooldown instead of blocking inline.
+    slot_result: Dict[int, Optional[Dict[str, Any]]] = {}
+    futures: Dict[int, Future] = {}
+    pool: Optional[ThreadPoolExecutor] = None
     try:
-        origin_ip = result.get("origin_ip")
-        if origin_ip and budget > 0:
-            summary = state.vt_ip(origin_ip)
-            if summary:
-                enrichment["lookups"].append(
-                    {"ioc": origin_ip, **summary}
-                )
-            budget -= 1
+        urlscan_slots = [i for i, (k, _) in enumerate(plan) if k == "urlscan"]
+        if urlscan_slots:
+            pool = ThreadPoolExecutor(max_workers=URLSCAN_MAX_WORKERS)
+            for i in urlscan_slots:
+                futures[i] = pool.submit(state.urlscan_search, plan[i][1])
 
-        iocs = result.get("iocs") or {}
-        domains = (iocs.get("domains", {}).get("header", [])
-                   + iocs.get("domains", {}).get("body", []))
-        for domain in dict.fromkeys(domains):
-            if budget <= 0:
-                break
-            summary = state.vt_domain(domain)
-            if summary:
-                enrichment["lookups"].append({"ioc": domain, **summary})
-            budget -= 1
-            if state.urlscan_key and budget > 0:
-                us = state.urlscan_search(domain)
-                if us:
-                    enrichment["lookups"].append({"ioc": domain, **us})
-                budget -= 1
+        for i, (kind, payload) in enumerate(plan):
+            if kind == "vt_ip":
+                slot_result[i] = state.vt_ip(payload)
+            elif kind == "vt_domain":
+                slot_result[i] = state.vt_domain(payload)
+            elif kind == "vt_hash":
+                slot_result[i] = state.vt_file_hash(payload.get("sha256", ""))
 
-        for att in iocs.get("attachment_hashes", []):
-            if budget <= 0:
-                break
-            summary = state.vt_file_hash(att.get("sha256", ""))
-            if summary:
-                enrichment["lookups"].append(
-                    {"ioc": att.get("filename", ""), **summary}
-                )
-            budget -= 1
+        for i, fut in futures.items():
+            try:
+                slot_result[i] = fut.result()
+            except Exception as exc:
+                state.errors.append(f"urlscan lookup failed: {type(exc).__name__}")
+                slot_result[i] = None
     except Exception as exc:
         enrichment["errors"].append(f"enrichment failure: {type(exc).__name__}")
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False)
+
+    # Phase 3: assemble in plan order so output matches the sequential run.
+    for i, (kind, payload) in enumerate(plan):
+        summary = slot_result.get(i)
+        if not summary:
+            continue
+        if kind == "vt_hash":
+            enrichment["lookups"].append({"ioc": payload.get("filename", ""), **summary})
+        else:
+            enrichment["lookups"].append({"ioc": payload, **summary})
+
+    # Google Safe Browsing: a single batched check of this email's URLs. A
+    # separate service/quota from VT and urlscan, so it runs once here rather
+    # than occupying per-IOC budget slots in the plan above.
+    if state.google_key:
+        sb_urls = iocs.get("urls", {}).get("header", []) + iocs.get("urls", {}).get("body", [])
+        sb_urls = list(dict.fromkeys(u for u in sb_urls if u))[:MAX_SB_URLS]
+        if sb_urls:
+            enrichment["lookups"].extend(state.safebrowsing_lookup(sb_urls))
 
     enrichment["errors"].extend(state.errors[-5:])
     return enrichment

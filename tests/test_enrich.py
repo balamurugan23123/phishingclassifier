@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from phishingclassifier.enrich import (
-    EnrichmentState, VT_MIN_INTERVAL, enrich_result,
+    EnrichmentState,
+    VT_MIN_INTERVAL,
+    enrich_result,
 )
 from phishingclassifier.heuristics import analyze_signals
 from phishingclassifier.parser import parse_eml
@@ -50,9 +52,58 @@ def test_cache_written_atomically(tmp_path, monkeypatch):
     cache_file = tmp_path / "cache" / "vt_cache.json"
     assert cache_file.is_file()
     data = json.loads(cache_file.read_text(encoding="utf-8"))
-    assert data["vt:/ip_addresses/1.2.3.4"]["data"]["ok"] is True
+    entry = data["vt:/ip_addresses/1.2.3.4"]
+    # envelope carries a timestamp + the cached value
+    assert "at" in entry
+    assert entry["value"]["data"]["ok"] is True
     leftovers = list((tmp_path / "cache").glob("*.tmp"))
     assert leftovers == []
+
+
+def _state_with_key(tmp_path, monkeypatch, **kw):
+    monkeypatch.setenv("VT_API_KEY", "dummy-key")
+    monkeypatch.delenv("VT_CACHE_TTL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return EnrichmentState(workdir=str(tmp_path), **kw)
+
+
+def test_cache_hit_within_ttl(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=3600)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    assert state._cached("vt:/domains/evil.com") == {"malicious": 5}
+    assert state.cache_hits == 1
+
+
+def test_cache_expires_after_ttl(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=100)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    # backdate the stored timestamp past the TTL
+    state._cache["vt:/domains/evil.com"]["at"] -= 1000
+    assert state._cached("vt:/domains/evil.com") is None
+    assert state.cache_expired >= 1
+    # stale entry is dropped from the cache and file
+    assert "vt:/domains/evil.com" not in state._cache
+
+
+def test_zero_ttl_disables_cache(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=0)
+    state._put_cache("vt:/domains/evil.com", {"malicious": 5})
+    assert state._cached("vt:/domains/evil.com") is None
+
+
+def test_legacy_entry_without_envelope_is_stale(tmp_path, monkeypatch):
+    state = _state_with_key(tmp_path, monkeypatch, cache_ttl=3600)
+    # simulate a pre-TTL cache file: value stored with no envelope
+    state._cache["vt:/domains/old.com"] = {"malicious": 9}
+    assert state._cached("vt:/domains/old.com") is None
+
+
+def test_ttl_read_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "dummy-key")
+    monkeypatch.setenv("VT_CACHE_TTL", "60")
+    monkeypatch.chdir(tmp_path)
+    state = EnrichmentState(workdir=str(tmp_path))
+    assert state.cache_ttl == 60
 
 
 def test_vt_free_tier_pacing(monkeypatch, tmp_path):
@@ -107,6 +158,48 @@ def test_urlscan_search_mode_only(monkeypatch, tmp_path):
     assert not any("/scan/" in u for u in called_urls)
 
 
+def test_enrich_result_overlaps_urlscan_with_vt_and_preserves_order(monkeypatch, tmp_path):
+    monkeypatch.setenv("VT_API_KEY", "dummy")
+    monkeypatch.setenv("URLSCAN_API_KEY", "dummy")
+    monkeypatch.chdir(tmp_path)
+    state = EnrichmentState(workdir=str(tmp_path))
+
+    # No real network: replace the lookups with fast fakes. urlscan_search
+    # runs on the thread pool while VT stays on the main thread; this asserts
+    # the concurrent path yields the exact same ordered output as sequential.
+    def fake_vt_ip(ip):
+        return {"source": "virustotal", "type": "ip", "malicious": 1}
+
+    def fake_vt_domain(d):
+        return {"source": "virustotal", "type": "domain", "malicious": 2}
+
+    def fake_urlscan(d):
+        return {
+            "source": "urlscan",
+            "type": "domain_search",
+            "total_existing_scans": 7,
+            "verdicts_seen": ["malicious"],
+        }
+
+    monkeypatch.setattr(state, "vt_ip", fake_vt_ip)
+    monkeypatch.setattr(state, "vt_domain", fake_vt_domain)
+    monkeypatch.setattr(state, "urlscan_search", fake_urlscan)
+
+    result = {
+        "origin_ip": None,
+        "iocs": {"domains": {"header": ["a.test", "b.test"], "body": []}, "attachment_hashes": []},
+    }
+    block = enrich_result(result, state, max_lookups=20)
+    assert block["mode"] == "live"
+    # each domain yields a VT result then its urlscan result, in order
+    assert [(lk["ioc"], lk["source"]) for lk in block["lookups"]] == [
+        ("a.test", "virustotal"),
+        ("a.test", "urlscan"),
+        ("b.test", "virustotal"),
+        ("b.test", "urlscan"),
+    ]
+
+
 def test_enrichment_never_raises(monkeypatch):
     state = EnrichmentState()
     state.vt_key = "dummy"
@@ -120,6 +213,100 @@ def test_enrichment_never_raises(monkeypatch):
     block = enrich_result(result, state)
     assert block["mode"] == "live"
     assert any("RuntimeError" in e for e in block["errors"])
+
+
+def _sb_state(tmp_path, monkeypatch):
+    """EnrichmentState with only a Google key, isolated from any real .env."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VT_API_KEY", raising=False)
+    monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy-sb")
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    return EnrichmentState(workdir=str(tmp_path))
+
+
+def test_safebrowsing_flags_matched_urls(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+    assert state.google_key == "dummy-sb"
+    captured = {}
+
+    def fake_post(url, params, payload):
+        captured["url"] = url
+        captured["params"] = params
+        captured["payload"] = payload
+        return {
+            "matches": [{"threat": {"url": "http://bad.test/"}, "threatType": "SOCIAL_ENGINEERING"}]
+        }
+
+    monkeypatch.setattr(state, "_http_post", fake_post)
+    out = state.safebrowsing_lookup(["http://bad.test/", "http://good.test/"])
+
+    assert captured["url"].startswith("https://safebrowsing.googleapis.com")
+    assert captured["params"] == {"key": "dummy-sb"}
+    # only the matched (unsafe) URL is returned as a lookup
+    assert [lk["ioc"] for lk in out] == ["http://bad.test/"]
+    assert out[0]["source"] == "safebrowsing"
+    assert out[0]["malicious"] == 1
+    assert out[0]["threat_types"] == ["SOCIAL_ENGINEERING"]
+    # the clean URL is still cached so it won't be re-queried
+    assert state._cached("sb:http://good.test/")["malicious"] == 0
+
+
+def test_safebrowsing_uses_cache(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+    calls = {"n": 0}
+
+    def fake_post(url, params, payload):
+        calls["n"] += 1
+        return {"matches": []}
+
+    monkeypatch.setattr(state, "_http_post", fake_post)
+    assert state.safebrowsing_lookup(["http://clean.test/"]) == []
+    assert calls["n"] == 1
+    # second lookup is served from cache -> no extra request
+    assert state.safebrowsing_lookup(["http://clean.test/"]) == []
+    assert calls["n"] == 1
+
+
+def test_safebrowsing_disabled_without_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("VT_API_KEY", raising=False)
+    monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    state = EnrichmentState(workdir=str(tmp_path))
+    assert state.google_key is None
+    assert state.safebrowsing_lookup(["http://x.test/"]) == []
+
+
+def test_enrich_result_runs_safebrowsing_batch(tmp_path, monkeypatch):
+    state = _sb_state(tmp_path, monkeypatch)
+
+    def fake_sb(urls):
+        return [
+            {
+                "source": "safebrowsing",
+                "type": "url",
+                "ioc": u,
+                "malicious": 1,
+                "threat_types": ["MALICIOUS_SOFTWARE"],
+            }
+            for u in urls
+        ]
+
+    monkeypatch.setattr(state, "safebrowsing_lookup", fake_sb)
+    result = {
+        "origin_ip": None,
+        "iocs": {
+            "domains": {"header": [], "body": []},
+            "urls": {"header": ["http://x.test/"], "body": ["http://y.test/"]},
+            "attachment_hashes": [],
+        },
+    }
+    block = enrich_result(result, state)
+    assert block["mode"] == "live"
+    checked = {lk["ioc"] for lk in block["lookups"] if lk["source"] == "safebrowsing"}
+    assert checked == {"http://x.test/", "http://y.test/"}
 
 
 def test_html_summary_has_no_remote_resources_and_escapes():

@@ -7,15 +7,11 @@ import email.policy
 import email.utils
 import hashlib
 import re
-from email.message import EmailMessage
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .utils import extract_ip, is_internal_ip
+from .utils import DANGEROUS_EXT, extract_ip, is_internal_ip
 
-_DANGEROUS_EXT = {
-    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
-    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
-}
 _ARCHIVE_EXT = {".zip", ".rar", ".7z", ".gz", ".tar"}
 
 
@@ -33,7 +29,7 @@ class ParsedEmail:
         self.reply_to: str = ""
         self.return_path: str = ""
         self.message_id: str = ""
-        self.date: Optional[email.utils.parsedate_to_datetime] = None
+        self.date: Optional[datetime] = None
         self.received_chain: List[str] = []
         self.origin_ip: Optional[str] = None
         self.origin_ip_reserved: Optional[bool] = None
@@ -44,6 +40,9 @@ class ParsedEmail:
         self.body_charset: str = ""
         # skip header checks when parsed from CSV row
         self.from_csv: bool = False
+        # memoization slot for heuristics._haystack(): a (key, value) pair
+        # where key is the source fields the value was derived from.
+        self._haystack_cache: Optional[tuple] = None
 
     @property
     def has_auth_header(self) -> bool:
@@ -171,6 +170,34 @@ def parse_eml(path: str) -> ParsedEmail:
     return parsed
 
 
+def iter_attachment_bytes(path: str):
+    """Yield ``(filename, decoded_payload_bytes)`` for each attachment part.
+
+    Used only by the opt-in deep attachment scan: the normal pipeline drops
+    payload bytes for opsec/performance reasons, so this deliberately re-reads
+    the file. Malformed parts are skipped silently.
+    """
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        msg = email.message_from_bytes(raw, policy=email.policy.compat32)
+    except Exception:
+        return
+    for part in msg.walk():
+        try:
+            if part.is_multipart():
+                continue
+            filename = part.get_filename()
+            disposition = str(part.get("Content-Disposition", "") or "")
+            if not filename and "attachment" not in disposition.lower():
+                continue
+            payload = part.get_payload(decode=True)
+        except Exception:
+            continue
+        if isinstance(payload, (bytes, bytearray)):
+            yield (filename or "(unnamed)"), bytes(payload)
+
+
 def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
     for part in msg.walk():
         try:
@@ -181,7 +208,7 @@ def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
             filename = part.get_filename()
             payload: Optional[bytes] = None
             try:
-                payload = part.get_payload(decode=True)
+                payload = part.get_payload(decode=True)  # type: ignore[assignment]
             except Exception:
                 payload = None
                 parsed.warnings.append("Attachment/body part undecodable; skipped")
@@ -193,17 +220,19 @@ def _walk_payload(msg: email.message.Message, parsed: ParsedEmail) -> None:
             if is_attachment:
                 name = filename or "(unnamed)"
                 lower = name.lower()
-                ext = lower[lower.rfind("."):] if "." in lower else ""
+                ext = lower[lower.rfind(".") :] if "." in lower else ""
                 digest = hashlib.sha256(payload).hexdigest()
-                parsed.attachments.append({
-                    "filename": name,
-                    "mime": content_type,
-                    "size": len(payload),
-                    "sha256": digest,
-                    "extension": ext,
-                    "dangerous": ext in _DANGEROUS_EXT,
-                    "archive": ext in _ARCHIVE_EXT,
-                })
+                parsed.attachments.append(
+                    {
+                        "filename": name,
+                        "mime": content_type,
+                        "size": len(payload),
+                        "sha256": digest,
+                        "extension": ext,
+                        "dangerous": ext in DANGEROUS_EXT,
+                        "archive": ext in _ARCHIVE_EXT,
+                    }
+                )
                 continue
 
             if content_type == "text/plain" and not parsed.text_body:

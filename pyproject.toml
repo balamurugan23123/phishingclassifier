@@ -1,3 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phishsleuth"
+description = "Explainable phishing-email investigation tool: parse, extract IOCs, score, enrich, and report."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dynamic = ["version", "dependencies"]
+keywords = ["phishing", "security", "email", "ioc", "classifier", "soc"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Text Processing :: Filters",
+]
+
+[project.scripts]
+phishsleuth = "phishingclassifier.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pip-audit>=2.7"]
+# Opt-in depth for `analyze --deep-attachments`: legacy OLE2 macro extraction.
+# The baseline (OOXML/ZIP macro detection) needs nothing beyond the stdlib.
+attachments = ["oletools>=0.60"]
+
+# Single source of truth for runtime deps: the pins in requirements.txt are
+# read directly, so pyproject and the deployment file can never drift.
+[tool.setuptools.dynamic]
+version = { attr = "phishingclassifier.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools]
+packages = ["phishingclassifier"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "venv", "__pycache__"]
+
+[tool.ruff.lint]
+# Conservative, correctness-focused ruleset that the codebase passes today.
+# E4/E7/E9 = real pycodestyle issues, F = pyflakes (unused imports/vars,
+# undefined names). Broader style rules (I, UP) are intentionally left off
+# until the code is cleaned up.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# dashboard/app.py inserts the repo root on sys.path before importing the
+# package, so its imports are legitimately below the top of the file. This
+# bootstrap is required for Streamlit Cloud, which installs requirements.txt
+# but not the local package itself.
+"dashboard/app.py" = ["E402"]
+
+[tool.ruff.format]
+# Formatting is handled by `ruff format` (Black-compatible) rather than a
+# separate black dependency, so lint + format share one tool and config.
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+# Type-check the importable package only. The dashboard relies on a runtime
+# sys.path bootstrap and Streamlit's dynamic API, and scripts/ are one-off
+# tools -- neither benefits from strict static typing today. python_version is
+# intentionally unset: mypy uses the running interpreter, which is what lets it
+# parse the PEP 695 syntax in modern numpy/scipy stubs.
+files = ["phishingclassifier"]
+ignore_missing_imports = true

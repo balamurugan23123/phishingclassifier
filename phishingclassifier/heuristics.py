@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -9,6 +10,9 @@ from urllib.parse import urlparse
 from .iocs import all_urls, extract_iocs
 from .ml import fuzzy_brand_hit, normalize_confusables
 from .parser import ParsedEmail
+from .utils import DANGEROUS_EXT
+
+logger = logging.getLogger(__name__)
 
 # signal weights
 W_HIGH = 20
@@ -46,42 +50,156 @@ BRANDS = {
 
 # known lookalike domains
 LOOKALIKES = {
-    "paypa1", "paypai", "paypa1.com", "g00gle", "goog1e", "rnicrosoft",
-    "rnicrosoft.com", "micros0ft", "arnazon", "amaz0n", "arnazon.com",
-    "app1e", "faceb00k", "fac ebook.com", "netf1ix", "1inkedin",
-    "lnstagram", "wel1sfargo", "chase-secure", "usps-secure",
-    "dhl-express-secure", "microsofl", "outl00k", "0utlook",
+    "paypa1",
+    "paypai",
+    "paypa1.com",
+    "g00gle",
+    "goog1e",
+    "rnicrosoft",
+    "rnicrosoft.com",
+    "micros0ft",
+    "arnazon",
+    "amaz0n",
+    "arnazon.com",
+    "app1e",
+    "faceb00k",
+    "fac ebook.com",
+    "netf1ix",
+    "1inkedin",
+    "lnstagram",
+    "wel1sfargo",
+    "chase-secure",
+    "usps-secure",
+    "dhl-express-secure",
+    "microsofl",
+    "outl00k",
+    "0utlook",
 }
 
 URL_SHORTENERS = {
-    "bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "buff.ly",
-    "rebrand.ly", "cutt.ly", "shorturl.at", "rb.gy", "tiny.cc",
-}
-
-DANGEROUS_EXT = {
-    ".exe", ".scr", ".js", ".vbs", ".lnk", ".hta",
-    ".docm", ".xlsm", ".bat", ".cmd", ".ps1", ".jar",
+    "bit.ly",
+    "tinyurl.com",
+    "goo.gl",
+    "t.co",
+    "ow.ly",
+    "is.gd",
+    "buff.ly",
+    "rebrand.ly",
+    "cutt.ly",
+    "shorturl.at",
+    "rb.gy",
+    "tiny.cc",
 }
 
 URGENCY_KEYWORDS = [
-    "verify your account", "account has been suspended", "suspended",
-    "unusual activity", "unusual sign-in", "click here", "limited time",
-    "act now", "immediately", "urgent", "final notice", "last warning",
-    "your account will be", "within 24 hours", "confirm your identity",
-    "update your payment", "avoid closure", "unauthorized access",
+    "verify your account",
+    "account has been suspended",
+    "suspended",
+    "unusual activity",
+    "unusual sign-in",
+    "click here",
+    "limited time",
+    "act now",
+    "immediately",
+    "urgent",
+    "final notice",
+    "last warning",
+    "your account will be",
+    "within 24 hours",
+    "confirm your identity",
+    "update your payment",
+    "avoid closure",
+    "unauthorized access",
 ]
 
+# Urgency / credential-lure phrases in the most common phishing languages.
+# The corpus is overwhelmingly English, but non-English 419 and BEC campaigns
+# are widespread; these are matched alongside the English keywords. Each entry
+# is (language-code, phrase) and both these and the body are run through
+# normalize_confusables at build time, so accents/homoglyphs stay consistent
+# on both sides of the match.
+URGENCY_KEYWORDS_I18N = [
+    ("es", "verifique su cuenta"),
+    ("es", "confirme su identidad"),
+    ("es", "su cuenta será suspendida"),
+    ("es", "actividad inusual"),
+    ("es", "urgentemente"),
+    ("es", "de inmediato"),
+    ("es", "último aviso"),
+    ("fr", "vérifiez votre compte"),
+    ("fr", "confirmez votre identité"),
+    ("fr", "votre compte sera suspendu"),
+    ("fr", "activité inhabituelle"),
+    ("fr", "urgemment"),
+    ("fr", "immédiatement"),
+    ("de", "bestätigen sie ihr konto"),
+    ("de", "identität bestätigen"),
+    ("de", "konto wurde gesperrt"),
+    ("de", "dringend"),
+    ("de", "sofort"),
+    ("de", "letzte warnung"),
+    ("pt", "verifique sua conta"),
+    ("pt", "confirme sua identidade"),
+    ("pt", "sua conta será suspensa"),
+    ("pt", "urgentemente"),
+    ("pt", "imediatamente"),
+    ("it", "verifica il tuo account"),
+    ("it", "conferma la tua identità"),
+    ("it", "il tuo account sarà sospeso"),
+    ("it", "urgentemente"),
+]
+
+
+def _build_urgency_phrases() -> List[tuple]:
+    """Pre-normalize every urgency phrase once at import for fast matching."""
+    out = [(normalize_confusables(p), "en") for p in URGENCY_KEYWORDS]
+    out += [(normalize_confusables(p), lang) for lang, p in URGENCY_KEYWORDS_I18N]
+    return out
+
+
+_URGENCY_PHRASES = _build_urgency_phrases()
+
 FREE_WEBMAIL_DOMAINS = {
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com",
-    "aol.com", "mail.com", "protonmail.com", "gmx.com", "yandex.com",
-    "icloud.com", "zoho.com", "inbox.lv", "rediffmail.com",
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
+    "live.com",
+    "aol.com",
+    "mail.com",
+    "protonmail.com",
+    "gmx.com",
+    "yandex.com",
+    "icloud.com",
+    "zoho.com",
+    "inbox.lv",
+    "rediffmail.com",
 }
 
 INSTITUTION_KEYWORDS = [
-    "bank", "security", "support", "admin", "billing", "finance",
-    "financial officer", "accounts", "treasury", "federal", "government",
-    "ministry", "embassy", "courier", "lottery", "director", "official",
-    "office", "authority", "department", "agency", "remittance", "officer",
+    "bank",
+    "security",
+    "support",
+    "admin",
+    "billing",
+    "finance",
+    "financial officer",
+    "accounts",
+    "treasury",
+    "federal",
+    "government",
+    "ministry",
+    "embassy",
+    "courier",
+    "lottery",
+    "director",
+    "official",
+    "office",
+    "authority",
+    "department",
+    "agency",
+    "remittance",
+    "officer",
 ]
 
 # Amount + release/pending pattern: the universal advance-fee shape.
@@ -94,10 +212,21 @@ MONEY_AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 RELEASE_LANGUAGE = [
-    "release your", "pending file", "unclaimed", "claim your",
-    "your money", "transfer fee", "activation charg", "registration charg",
-    "processing fee", "delivery fee", "compensation", "atm card",
-    "tracking number", "pick up the money", "daily transfer",
+    "release your",
+    "pending file",
+    "unclaimed",
+    "claim your",
+    "your money",
+    "transfer fee",
+    "activation charg",
+    "registration charg",
+    "processing fee",
+    "delivery fee",
+    "compensation",
+    "atm card",
+    "tracking number",
+    "pick up the money",
+    "daily transfer",
 ]
 
 # Irreversible-payment requests — the universal scam tell. Direction
@@ -129,47 +258,107 @@ WINNINGS_RE = re.compile(
     re.IGNORECASE,
 )
 CLAIM_INSTRUCTIONS = [
-    "claims must", "claims agent", "promotions program",
-    "promotion program", "final winner", "contact the claims",
-    "send your name", "fill the form", "claim form",
-    "keep this confidential", "unclaimed funds",
+    "claims must",
+    "claims agent",
+    "promotions program",
+    "promotion program",
+    "final winner",
+    "contact the claims",
+    "send your name",
+    "fill the form",
+    "claim form",
+    "keep this confidential",
+    "unclaimed funds",
 ]
 
 # Credential-lure phrasing (mailbox-reconfirmation family). Deliberately
 # excludes legit password-reset wording ("reset your password", "set a
 # new password", "choose a password") — those are legitimate flows.
 CREDENTIAL_LURE = [
-    "re-confirm", "reconfirm", "re-enter", "re-activate your mailbox",
-    "validate your mailbox", "confirm your mailbox", "mailbox credentials",
-    "email password to", "confirm your email password",
-    "avoid service interruption", "mailbox will be closed",
-    "account deactivation", "validate your account", "renew your mailbox",
+    "re-confirm",
+    "reconfirm",
+    "re-enter",
+    "re-activate your mailbox",
+    "validate your mailbox",
+    "confirm your mailbox",
+    "mailbox credentials",
+    "email password to",
+    "confirm your email password",
+    "avoid service interruption",
+    "mailbox will be closed",
+    "account deactivation",
+    "validate your account",
+    "renew your mailbox",
 ]
 
 MONEY_SCAM_KEYWORDS = [
-    "wire transfer", "inheritance", "next of kin", "beneficiary",
-    "unclaimed fund", "depositor", "atm card", "dead client",
-    "late customer", "god fearing", "strictly confidential",
-    "business proposal", "sum of", "usd$", "million united state",
-    "million dollars", "foreign partner", "transfer the sum",
-    "died in", "plane crash", "capital flight", "orphanage",
+    "wire transfer",
+    "inheritance",
+    "next of kin",
+    "beneficiary",
+    "unclaimed fund",
+    "depositor",
+    "atm card",
+    "dead client",
+    "late customer",
+    "god fearing",
+    "strictly confidential",
+    "business proposal",
+    "sum of",
+    "usd$",
+    "million united state",
+    "million dollars",
+    "foreign partner",
+    "transfer the sum",
+    "died in",
+    "plane crash",
+    "capital flight",
+    "orphanage",
 ]
 
 SPAM_SALES_KEYWORDS = [
-    "viagra", "cialis", "male enhancement", "pills", "casino",
-    "lottery winner", "you have won", "congratulations! you",
-    "cheap meds", "no prescription", "work from home",
-    "earn extra income", "weight loss", "free trial",
-    "click below to buy", "discount 80", "viagra",
-    "unsold merchandise", "replica watches", "online pharmacy",
-    "100% free", "risk-free", "guaranteed income", "act now and",
-    "limited supply", "best price", "special offer",
+    "viagra",
+    "cialis",
+    "male enhancement",
+    "pills",
+    "casino",
+    "lottery winner",
+    "you have won",
+    "congratulations! you",
+    "cheap meds",
+    "no prescription",
+    "work from home",
+    "earn extra income",
+    "weight loss",
+    "free trial",
+    "click below to buy",
+    "discount 80",
+    "viagra",
+    "unsold merchandise",
+    "replica watches",
+    "online pharmacy",
+    "100% free",
+    "risk-free",
+    "guaranteed income",
+    "act now and",
+    "limited supply",
+    "best price",
+    "special offer",
 ]
 
 GENERIC_GREETINGS = [
-    "dear customer", "dear client", "dear user", "dear account holder",
-    "dear sir/madam", "dear sir", "dear madam", "dear beneficiary",
-    "dear friend", "dear partner", "dear winner", "dear esteemed",
+    "dear customer",
+    "dear client",
+    "dear user",
+    "dear account holder",
+    "dear sir/madam",
+    "dear sir",
+    "dear madam",
+    "dear beneficiary",
+    "dear friend",
+    "dear partner",
+    "dear winner",
+    "dear esteemed",
 ]
 
 LINK_COUNT_THRESHOLD = 6
@@ -178,6 +367,30 @@ CORRELATION_BONUS = 15
 
 ENTROPY_THRESHOLD = 3.5
 MIN_DOMAIN_LEN_FOR_ENTROPY = 10
+
+# Mailer / client User-Agent strings that are rare in genuine user mail but
+# common in scripted phishing and bulk-mail infrastructure. Matched as
+# case-insensitive substrings against the X-Mailer and User-Agent headers.
+# A real desktop/webmail client never identifies itself as an HTTP library.
+SUSPICIOUS_MAILERS = [
+    "python-requests",
+    "python-urllib",
+    "smtplib",
+    "curl/",
+    "wget/",
+    "go-http-client",
+    "httpclient",
+    "java/",
+    "bulk e-mail",
+    "bulkmailer",
+    "mass mailer",
+    "email bomber",
+]
+
+# Subject prefixes that claim "this is a reply". Real mail clients always add
+# In-Reply-To/References when replying, so a reply-prefixed subject with no
+# threading headers is a fabricated thread (reply-chain hijack / BEC).
+REPLY_SUBJECT_PREFIXES = ("re:", "aw:", "resp:", "rv:", "reply:")
 
 
 def _signal(sid: str, weight: int, reason: str, evidence: str) -> Dict[str, Any]:
@@ -190,63 +403,78 @@ def _domain_of_addr(addr: str) -> str:
 
 def _check_auth(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     if not parsed.has_auth_header:
-        signals.append(_signal(
-            "auth_header_absent", W_LOW,
-            "No Authentication-Results header: SPF/DKIM/DMARC could not be verified",
-            "(header absent)",
-        ))
+        signals.append(
+            _signal(
+                "auth_header_absent",
+                W_LOW,
+                "No Authentication-Results header: SPF/DKIM/DMARC could not be verified",
+                "(header absent)",
+            )
+        )
         return
     for mech in ("spf", "dkim", "dmarc"):
         verdict = parsed.auth(mech)
         if verdict in ("fail", "softfail"):
-            signals.append(_signal(
-                f"{mech}_{verdict}", W_HIGH,
-                f"{mech.upper()} {verdict}: sending server is not authorized for the sender domain",
-                f"Authentication-Results: {mech}={verdict}",
-            ))
+            signals.append(
+                _signal(
+                    f"{mech}_{verdict}",
+                    W_HIGH,
+                    f"{mech.upper()} {verdict}: sending server is not authorized for the sender domain",
+                    f"Authentication-Results: {mech}={verdict}",
+                )
+            )
     if parsed.auth("spf") == "none" and parsed.auth("dkim") == "none":
-        signals.append(_signal(
-            "auth_none", W_LOW,
-            "Email carries no passing authentication at all",
-            "Authentication-Results: spf=none dkim=none",
-        ))
+        signals.append(
+            _signal(
+                "auth_none",
+                W_LOW,
+                "Email carries no passing authentication at all",
+                "Authentication-Results: spf=none dkim=none",
+            )
+        )
 
 
 def _check_envelope_spoof(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     rp_dom = _domain_of_addr(parsed.return_path)
     if rp_dom and parsed.from_domain and rp_dom != parsed.from_domain:
-        signals.append(_signal(
-            "return_path_mismatch", W_HIGH,
-            f"Return-Path domain ({rp_dom}) differs from From domain ({parsed.from_domain})",
-            f"Return-Path: {parsed.return_path} vs From: {parsed.from_addr}",
-        ))
+        signals.append(
+            _signal(
+                "return_path_mismatch",
+                W_HIGH,
+                f"Return-Path domain ({rp_dom}) differs from From domain ({parsed.from_domain})",
+                f"Return-Path: {parsed.return_path} vs From: {parsed.from_addr}",
+            )
+        )
     if parsed.reply_to:
         rt_dom = _domain_of_addr(parsed.reply_to)
         if rt_dom and parsed.from_domain and rt_dom != parsed.from_domain:
-            signals.append(_signal(
-                "reply_to_mismatch", W_MED,
-                f"Reply-To domain ({rt_dom}) differs from From domain ({parsed.from_domain})",
-                f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
-            ))
+            signals.append(
+                _signal(
+                    "reply_to_mismatch",
+                    W_MED,
+                    f"Reply-To domain ({rt_dom}) differs from From domain ({parsed.from_domain})",
+                    f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
+                )
+            )
         elif parsed.reply_to and parsed.reply_to.lower() != parsed.from_addr.lower():
             # Same domain, DIFFERENT identity: the reply goes to a second
             # attacker-controlled mailbox. Fire only when the reply-to
             # local part looks institutional/role-based — 'we will reply
             # from a different personal mailbox' is not a normal pattern.
             rt_local = parsed.reply_to.rsplit("@", 1)[0].lower()
-            from_local = (parsed.from_addr or "").rsplit("@", 1)[0].lower()
             norm_rt = normalize_confusables(rt_local)
-            institutional = any(
-                kw in norm_rt for kw in INSTITUTION_KEYWORDS + list(BRANDS)
-            )
+            institutional = any(kw in norm_rt for kw in INSTITUTION_KEYWORDS + list(BRANDS))
             if institutional:
-                signals.append(_signal(
-                    "reply_to_identity_divergence", W_MEDHIGH,
-                    f"Reply-To ({parsed.reply_to}) is a different identity "
-                    f"than the From ({parsed.from_addr}) on the same domain — "
-                    "replies are silently redirected to another mailbox",
-                    f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
-                ))
+                signals.append(
+                    _signal(
+                        "reply_to_identity_divergence",
+                        W_MEDHIGH,
+                        f"Reply-To ({parsed.reply_to}) is a different identity "
+                        f"than the From ({parsed.from_addr}) on the same domain — "
+                        "replies are silently redirected to another mailbox",
+                        f"Reply-To: {parsed.reply_to} vs From: {parsed.from_addr}",
+                    )
+                )
 
 
 def _check_display_name(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -254,23 +482,77 @@ def _check_display_name(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> N
     for brand, legit_domains in BRANDS.items():
         if re.search(rf"\b{re.escape(brand)}\b", display):
             if parsed.from_domain not in legit_domains:
-                signals.append(_signal(
-                    "display_name_spoof", W_HIGH,
-                    f"Display name mentions '{brand}' but domain '{parsed.from_domain}' is not official",
-                    f"From: {parsed.from_display} <{parsed.from_addr}>",
-                ))
+                signals.append(
+                    _signal(
+                        "display_name_spoof",
+                        W_HIGH,
+                        f"Display name mentions '{brand}' but domain '{parsed.from_domain}' is not official",
+                        f"From: {parsed.from_display} <{parsed.from_addr}>",
+                    )
+                )
             break
+
+
+def _check_reply_chain(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Detect a fabricated reply thread (reply-chain hijack / BEC).
+
+    A genuine reply carries In-Reply-To and/or References. When the subject
+    claims to be a reply but neither header is present, the "thread" is
+    invented to pressure the recipient into trusting a fake conversation.
+    """
+    subject = (parsed.subject or "").lstrip().lower()
+    if not subject.startswith(REPLY_SUBJECT_PREFIXES):
+        return
+    has_threading = bool(parsed.headers.get("in-reply-to") or parsed.headers.get("references"))
+    if not has_threading:
+        signals.append(
+            _signal(
+                "fake_reply_thread",
+                W_MED,
+                "Subject claims to be a reply but no In-Reply-To/References header backs it",
+                f"Subject: {parsed.subject!r} (threading headers absent)",
+            )
+        )
+
+
+def _check_mailer(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Flag X-Mailer / User-Agent strings that betray scripted or bulk senders.
+
+    Only fires on a *present*, incriminating header value, so it is safe to run
+    on CSV corpora (which rarely carry these headers) -- absence is never
+    penalised, since plenty of legitimate MTAs omit a mailer tag.
+    """
+    for header in ("x-mailer", "user-agent"):
+        value = parsed.headers.get(header, "")
+        if not value:
+            continue
+        low = value.lower()
+        for token in SUSPICIOUS_MAILERS:
+            if token in low:
+                signals.append(
+                    _signal(
+                        "suspicious_mailer",
+                        W_LOW,
+                        f"{header} value {value!r} indicates scripted or bulk sending",
+                        f"{header}: {value}",
+                    )
+                )
+                break
 
 
 def _check_message_id_date(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     if not parsed.message_id or parsed.message_id in ("<>", "<>"):
-        signals.append(_signal(
-            "message_id_absent", W_LOW,
-            "Message-ID is missing or malformed",
-            f"Message-ID: {parsed.message_id or '(absent)'}",
-        ))
+        signals.append(
+            _signal(
+                "message_id_absent",
+                W_LOW,
+                "Message-ID is missing or malformed",
+                f"Message-ID: {parsed.message_id or '(absent)'}",
+            )
+        )
     if parsed.date is not None:
         import datetime as _dt
+
         now = _dt.datetime.now(_dt.timezone.utc)
         try:
             when = parsed.date
@@ -278,28 +560,97 @@ def _check_message_id_date(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -
                 when = when.replace(tzinfo=_dt.timezone.utc)
             delta_days = (now - when).days
             if delta_days < -2:
-                signals.append(_signal(
-                    "date_future", W_LOW,
-                    f"Date header is {abs(delta_days)} days in the future",
-                    f"Date: {parsed.headers.get('date', '')}",
-                ))
+                signals.append(
+                    _signal(
+                        "date_future",
+                        W_LOW,
+                        f"Date header is {abs(delta_days)} days in the future",
+                        f"Date: {parsed.headers.get('date', '')}",
+                    )
+                )
             elif delta_days > 365:
-                signals.append(_signal(
-                    "date_stale", W_LOW,
-                    f"Date header is {delta_days} days old",
-                    f"Date: {parsed.headers.get('date', '')}",
-                ))
+                signals.append(
+                    _signal(
+                        "date_stale",
+                        W_LOW,
+                        f"Date header is {delta_days} days old",
+                        f"Date: {parsed.headers.get('date', '')}",
+                    )
+                )
         except Exception:
-            pass
+            # Malformed/unparseable Date headers are common in real corpora;
+            # skip the date signal but leave a trace for debugging.
+            logger.debug(
+                "could not parse Date header %r", parsed.headers.get("date", ""), exc_info=True
+            )
 
 
 def _check_origin_ip(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     if parsed.origin_ip_reserved:
-        signals.append(_signal(
-            "origin_ip_internal", W_MED,
-            "No public originating IP found in Received chain",
-            f"Received hops: {len(parsed.received_chain)}",
-        ))
+        signals.append(
+            _signal(
+                "origin_ip_internal",
+                W_MED,
+                "No public originating IP found in Received chain",
+                f"Received hops: {len(parsed.received_chain)}",
+            )
+        )
+
+
+def _check_received_chain(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
+    """Analyse the Received chain offline.
+
+    Two low-noise signals: a completely absent chain (mail that never crossed a
+    relay -- hand-crafted or stripped), and non-monotonic hop timestamps (a
+    delivery hop timestamped more than a day *before* an upstream one is
+    physically impossible and indicates forged/backdated headers). A generous
+    24h tolerance absorbs normal inter-server clock skew. ASN / geo-IP lookup
+    would need live whois/DNS and is deliberately left to the opt-in
+    enrichment layer, so the default path stays offline.
+    """
+    hops = parsed.received_chain
+    if not hops:
+        signals.append(
+            _signal(
+                "received_chain_absent",
+                W_LOW,
+                "No Received headers: the message did not traverse any mail relay",
+                "Received: (absent)",
+            )
+        )
+        return
+
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+
+    times: List[Any] = []
+    for hop in hops:
+        # Received value is "<hops>; <date>" -- the timestamp follows the last ';'.
+        tail = hop.rsplit(";", 1)[-1]
+        try:
+            dt = parsedate_to_datetime(tail)
+        except (TypeError, ValueError, IndexError):
+            dt = None
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        times.append(dt)
+
+    # hops[0] is the delivery (newest) hop, hops[-1] the origin. A downstream hop
+    # must never be timestamped materially before an upstream one.
+    for newer, older in zip(times, times[1:]):
+        if newer is None or older is None:
+            continue
+        if (older - newer).total_seconds() > 86400:
+            signals.append(
+                _signal(
+                    "received_timestamp_backdated",
+                    W_LOW,
+                    "A downstream Received hop is timestamped over a day before an upstream one",
+                    "Received chain timestamps are non-monotonic (possible header forgery)",
+                )
+            )
+            break
 
 
 def _url_host(url: str) -> str:
@@ -315,58 +666,77 @@ def _check_urls(parsed: ParsedEmail, iocs: Dict[str, Any], signals: List[Dict[st
         if not host:
             continue
         if re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", host):
-            signals.append(_signal(
-                "url_ip_literal", W_HIGH,
-                f"URL uses a raw IP address: {url}",
-                url,
-            ))
+            signals.append(
+                _signal(
+                    "url_ip_literal",
+                    W_HIGH,
+                    f"URL uses a raw IP address: {url}",
+                    url,
+                )
+            )
         if "xn--" in host:
-            signals.append(_signal(
-                "url_punycode", W_HIGH,
-                f"URL host contains punycode: {url}",
-                url,
-            ))
-        if host in URL_SHORTENERS or any(
-            host.endswith("." + s) for s in URL_SHORTENERS
-        ):
-            signals.append(_signal(
-                "url_shortener", W_MEDHIGH,
-                f"URL uses a shortener service: {url}",
-                url,
-            ))
+            signals.append(
+                _signal(
+                    "url_punycode",
+                    W_HIGH,
+                    f"URL host contains punycode: {url}",
+                    url,
+                )
+            )
+        if host in URL_SHORTENERS or any(host.endswith("." + s) for s in URL_SHORTENERS):
+            signals.append(
+                _signal(
+                    "url_shortener",
+                    W_MEDHIGH,
+                    f"URL uses a shortener service: {url}",
+                    url,
+                )
+            )
         try:
             port = urlparse(url).port
         except ValueError:
             port = None  # malformed port in corpus URL (e.g. ':80,') — skip
         if port is not None and port not in (80, 443):
-            signals.append(_signal(
-                "url_nonstandard_port", W_MED,
-                f"URL uses non-standard port {port}: {url}",
-                url,
-            ))
+            signals.append(
+                _signal(
+                    "url_nonstandard_port",
+                    W_MED,
+                    f"URL uses non-standard port {port}: {url}",
+                    url,
+                )
+            )
         subdomain_depth = host.count(".")
         if subdomain_depth >= 5:
-            signals.append(_signal(
-                "url_deep_subdomains", W_LOW,
-                f"URL host has high subdomain depth: {url}",
-                url,
-            ))
+            signals.append(
+                _signal(
+                    "url_deep_subdomains",
+                    W_LOW,
+                    f"URL host has high subdomain depth: {url}",
+                    url,
+                )
+            )
         for like in LOOKALIKES:
             if like in host:
-                signals.append(_signal(
-                    "lookalike_domain", W_HIGH,
-                    f"Host resembles a brand domain: {url} (matched '{like}')",
-                    url,
-                ))
+                signals.append(
+                    _signal(
+                        "lookalike_domain",
+                        W_HIGH,
+                        f"Host resembles a brand domain: {url} (matched '{like}')",
+                        url,
+                    )
+                )
                 break
         else:
             brand = fuzzy_brand_hit(host)
             if brand:
-                signals.append(_signal(
-                    "brand_lookalike_fuzzy", W_HIGH,
-                    f"Host is a near-match of brand '{brand}': {url}",
-                    url,
-                ))
+                signals.append(
+                    _signal(
+                        "brand_lookalike_fuzzy",
+                        W_HIGH,
+                        f"Host is a near-match of brand '{brand}': {url}",
+                        url,
+                    )
+                )
 
 
 def _check_link_text_mismatch(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -375,21 +745,23 @@ def _check_link_text_mismatch(parsed: ParsedEmail, signals: List[Dict[str, Any]]
         return
     for m in re.finditer(
         r'<a\s[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>',
-        html, re.IGNORECASE | re.DOTALL,
+        html,
+        re.IGNORECASE | re.DOTALL,
     ):
         href, text = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
         href_host = _url_host(href if "//" in href else "")
-        text_domains = re.findall(
-            r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b", text
-        )
+        text_domains = re.findall(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b", text)
         if href_host and text_domains:
             text_host = text_domains[0].lower()
             if text_host != href_host:
-                signals.append(_signal(
-                    "link_text_mismatch", W_HIGH,
-                    f"Link text shows '{text_host}' but href goes to '{href_host}'",
-                    f"text='{text}' href='{href}'",
-                ))
+                signals.append(
+                    _signal(
+                        "link_text_mismatch",
+                        W_HIGH,
+                        f"Link text shows '{text_host}' but href goes to '{href_host}'",
+                        f"text='{text}' href='{href}'",
+                    )
+                )
 
 
 def _check_forms(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -399,15 +771,16 @@ def _check_forms(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     for m in re.finditer(r"<form\b[^>]*>(.*?)</form>", html, re.IGNORECASE | re.DOTALL):
         body = m.group(0)
         action = re.search(r"action\s*=\s*[\"']([^\"']+)[\"']", body, re.IGNORECASE)
-        has_password = re.search(
-            r'type\s*=\s*["\']password["\']', body, re.IGNORECASE
-        )
+        has_password = re.search(r'type\s*=\s*["\']password["\']', body, re.IGNORECASE)
         if has_password:
-            signals.append(_signal(
-                "credential_form", W_HIGH,
-                "HTML contains a form with a password field",
-                f"<form action={action.group(1) if action else '(none)'}> with password input",
-            ))
+            signals.append(
+                _signal(
+                    "credential_form",
+                    W_HIGH,
+                    "HTML contains a form with a password field",
+                    f"<form action={action.group(1) if action else '(none)'}> with password input",
+                )
+            )
             break
 
 
@@ -416,36 +789,44 @@ def _check_attachments(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> No
         ext = att.get("extension", "")
         name = att.get("filename", "(unnamed)")
         if ext in DANGEROUS_EXT:
-            signals.append(_signal(
-                "dangerous_attachment", W_HIGH,
-                f"Attachment '{name}' has dangerous extension '{ext}'",
-                f"{name} ({att.get('mime')}, {att.get('size')} bytes)",
-            ))
+            signals.append(
+                _signal(
+                    "dangerous_attachment",
+                    W_HIGH,
+                    f"Attachment '{name}' has dangerous extension '{ext}'",
+                    f"{name} ({att.get('mime')}, {att.get('size')} bytes)",
+                )
+            )
         if att.get("archive") and re.search(
             r"pass(word)?\s*[:=]", parsed.text_body + parsed.html_body, re.IGNORECASE
         ):
-            signals.append(_signal(
-                "passworded_archive", W_MEDHIGH,
-                f"Archive attachment '{name}' with password hint in body",
-                name,
-            ))
+            signals.append(
+                _signal(
+                    "passworded_archive",
+                    W_MEDHIGH,
+                    f"Archive attachment '{name}' with password hint in body",
+                    name,
+                )
+            )
 
 
 def _check_urgency(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
-    haystack = (parsed.subject + "\n" + parsed.text_body + "\n" +
-                re.sub(r"<[^>]+>", " ", parsed.html_body)).lower()
+    hay = _haystack(parsed)
     fired, total_weight = [], 0
-    for kw in URGENCY_KEYWORDS:
-        if kw in haystack:
-            fired.append(kw)
+    for phrase, lang in _URGENCY_PHRASES:
+        if phrase in hay:
+            fired.append(phrase if lang == "en" else f"{phrase} [{lang}]")
             total_weight += W_LOW
     if fired:
         capped = min(total_weight, W_MEDHIGH)
-        signals.append(_signal(
-            "urgency_keywords", capped,
-            f"Urgency phrases detected ({len(fired)} phrase(s))",
-            ", ".join(fired[:5]),
-        ))
+        signals.append(
+            _signal(
+                "urgency_keywords",
+                capped,
+                f"Urgency phrases detected ({len(fired)} phrase(s))",
+                ", ".join(fired[:5]),
+            )
+        )
 
 
 def _check_base64_blobs(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -453,16 +834,18 @@ def _check_base64_blobs(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> N
     if not html:
         return
     for m in re.finditer(r"[A-Za-z0-9+/=]{200,}", html):
-        signals.append(_signal(
-            "base64_blob", W_MED,
-            f"Large base64 blob ({len(m.group(0))} chars) in HTML",
-            m.group(0)[:60] + "...",
-        ))
+        signals.append(
+            _signal(
+                "base64_blob",
+                W_MED,
+                f"Large base64 blob ({len(m.group(0))} chars) in HTML",
+                m.group(0)[:60] + "...",
+            )
+        )
         break
 
 
-def _check_free_webmail_impersonation(parsed: ParsedEmail,
-                                      signals: List[Dict[str, Any]]) -> None:
+def _check_free_webmail_impersonation(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     """Institution claims from a free-webmail From address.
 
     Scans display name, subject, AND body — real 419 mail signs off as
@@ -473,16 +856,17 @@ def _check_free_webmail_impersonation(parsed: ParsedEmail,
         return
     haystack = _haystack(parsed)
     display = (parsed.from_display or "").lower()
-    hit = next((kw for kw in INSTITUTION_KEYWORDS
-                if kw in haystack or kw in display), None)
+    hit = next((kw for kw in INSTITUTION_KEYWORDS if kw in haystack or kw in display), None)
     if hit:
-        signals.append(_signal(
-            "free_webmail_impersonation", W_MEDHIGH,
-            f"Institution claim ('{hit}') sent from free webmail "
-            f"({parsed.from_domain}) — no real institution does this",
-            f"From: {parsed.from_display} <{parsed.from_addr}>; "
-            f"matched '{hit}'",
-        ))
+        signals.append(
+            _signal(
+                "free_webmail_impersonation",
+                W_MEDHIGH,
+                f"Institution claim ('{hit}') sent from free webmail "
+                f"({parsed.from_domain}) — no real institution does this",
+                f"From: {parsed.from_display} <{parsed.from_addr}>; matched '{hit}'",
+            )
+        )
     # Brand mention anywhere while sending from free webmail: the MoneyGram
     # scam class — brand impersonated in body, sender on gmail/yahoo.
     # FP guards: a brand used as PAYMENT METHOD ("Apple gift cards") or as
@@ -495,10 +879,11 @@ def _check_free_webmail_impersonation(parsed: ParsedEmail,
         r"\b(?:apple|itunes|google\s?play|steam|amazon|walmart|target)\s+"
         r"gift\s?cards?\b|\bgift\s?cards?\s+(?:from|for)\s+"
         r"(?:apple|amazon|walmart|target|steam)\b",
-        " ", brand_zone, flags=re.IGNORECASE,
+        " ",
+        brand_zone,
+        flags=re.IGNORECASE,
     )
-    brand_zone = brand_zone.replace(" gift card", " ").replace(
-        " gift cards", " ")
+    brand_zone = brand_zone.replace(" gift card", " ").replace(" gift cards", " ")
     for brand in BRANDS:
         if brand == "outlook" or brand in ("google", "icloud"):
             continue  # brands owned BY webmail providers
@@ -506,21 +891,42 @@ def _check_free_webmail_impersonation(parsed: ParsedEmail,
         if re.search(rf"\b{re.escape(norm_brand)}\b", brand_zone):
             legit_domains = BRANDS[brand]
             if parsed.from_domain not in legit_domains:
-                signals.append(_signal(
-                    "webmail_brand_impersonation", W_HIGH,
-                    f"Email claims to be from brand '{brand}' but is sent "
-                    f"from free webmail ({parsed.from_domain}) — "
-                    "classic advance-fee impersonation",
-                    f"From: {parsed.from_display} <{parsed.from_addr}>; "
-                    f"brand '{brand}' in body/subject",
-                ))
+                signals.append(
+                    _signal(
+                        "webmail_brand_impersonation",
+                        W_HIGH,
+                        f"Email claims to be from brand '{brand}' but is sent "
+                        f"from free webmail ({parsed.from_domain}) — "
+                        "classic advance-fee impersonation",
+                        f"From: {parsed.from_display} <{parsed.from_addr}>; "
+                        f"brand '{brand}' in body/subject",
+                    )
+                )
                 break
 
 
 def _haystack(parsed: ParsedEmail) -> str:
-    raw = (parsed.subject + "\n" + parsed.text_body + "\n" +
-           re.sub(r"<[^>]+>", " ", parsed.html_body)).lower()
-    return normalize_confusables(raw)
+    """Lowercased, confusable-normalized subject+body+stripped-HTML.
+
+    Expensive (regex tag-strip + NFKC + per-char leet mapping) and read by
+    six different checks against the same email. Memoize on the instance,
+    keyed on the source fields so the cache stays correct if any are ever
+    reassigned between calls.
+    """
+    key = (parsed.subject, parsed.text_body, parsed.html_body)
+    cached = getattr(parsed, "_haystack_cache", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    raw = (
+        (parsed.subject or "")
+        + "\n"
+        + (parsed.text_body or "")
+        + "\n"
+        + re.sub(r"<[^>]+>", " ", parsed.html_body or "")
+    ).lower()
+    result = normalize_confusables(raw)
+    parsed._haystack_cache = (key, result)
+    return result
 
 
 def _check_money_scam(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -532,36 +938,43 @@ def _check_money_scam(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> Non
     amounts = MONEY_AMOUNT_RE.findall(text)
     release = [kw for kw in RELEASE_LANGUAGE if kw in text]
     if amounts and release:
-        signals.append(_signal(
-            "advance_fee_structure", W_MEDHIGH,
-            f"Large money amount ({len(amounts)}x) paired with release/"
-            f"fee language ({len(release)}x) — advance-fee scam structure",
-            f"amounts: {', '.join(amounts[:3])}; release: "
-            f"{', '.join(release[:3])}",
-        ))
+        signals.append(
+            _signal(
+                "advance_fee_structure",
+                W_MEDHIGH,
+                f"Large money amount ({len(amounts)}x) paired with release/"
+                f"fee language ({len(release)}x) — advance-fee scam structure",
+                f"amounts: {', '.join(amounts[:3])}; release: {', '.join(release[:3])}",
+            )
+        )
         fired = fired or ["advance-fee structure"]
     if fired:
         weight = W_MEDHIGH if len(fired) <= 2 else W_HIGH
-        signals.append(_signal(
-            "money_scam_language", weight,
-            f"Advance-fee scam language detected ({len(fired)} phrase(s))",
-            ", ".join(fired[:5]),
-        ))
+        signals.append(
+            _signal(
+                "money_scam_language",
+                weight,
+                f"Advance-fee scam language detected ({len(fired)} phrase(s))",
+                ", ".join(fired[:5]),
+            )
+        )
 
 
-def _check_irreversible_payment(parsed: ParsedEmail,
-                                signals: List[Dict[str, Any]]) -> None:
+def _check_irreversible_payment(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     """Requests to pay via gift cards / crypto / wire — the universal scam
     tell. No legitimate business ever asks for gift cards."""
     text = _haystack(parsed)
     hits = IRREVERSIBLE_PAYMENT_RE.findall(text)
     if hits:
-        signals.append(_signal(
-            "irreversible_payment_request", W_HIGH,
-            f"Payment requested via irreversible method ({len(hits)}x): "
-            "gift cards / crypto / wire — no legitimate business does this",
-            "; ".join(h[:50] for h in hits[:3]),
-        ))
+        signals.append(
+            _signal(
+                "irreversible_payment_request",
+                W_HIGH,
+                f"Payment requested via irreversible method ({len(hits)}x): "
+                "gift cards / crypto / wire — no legitimate business does this",
+                "; ".join(h[:50] for h in hits[:3]),
+            )
+        )
 
 
 def _check_windfall(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
@@ -570,62 +983,75 @@ def _check_windfall(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     win = WINNINGS_RE.search(text)
     claim = [c for c in CLAIM_INSTRUCTIONS if c in text]
     if win and claim:
-        signals.append(_signal(
-            "windfall_claim", W_HIGH,
-            "Windfall/win claim paired with claim instructions — "
-            "lottery/advance-fee structure",
-            f"win: '{win.group(0)}'; instructions: {', '.join(claim[:3])}",
-        ))
+        signals.append(
+            _signal(
+                "windfall_claim",
+                W_HIGH,
+                "Windfall/win claim paired with claim instructions — lottery/advance-fee structure",
+                f"win: '{win.group(0)}'; instructions: {', '.join(claim[:3])}",
+            )
+        )
 
 
-def _check_credential_lure(parsed: ParsedEmail,
-                           signals: List[Dict[str, Any]]) -> None:
+def _check_credential_lure(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     """Mailbox/credential 're-confirmation' phrasing. Legitimate flows say
     'reset your password' — lures say 're-confirm your credentials'."""
     text = _haystack(parsed)
     fired = [c for c in CREDENTIAL_LURE if c in text]
     if fired:
-        signals.append(_signal(
-            "credential_lure_language", W_MEDHIGH,
-            f"Credential re-confirmation lure ({len(fired)} phrase(s)) — "
-            "phrasing legitimate password-reset mail never uses",
-            ", ".join(fired[:4]),
-        ))
+        signals.append(
+            _signal(
+                "credential_lure_language",
+                W_MEDHIGH,
+                f"Credential re-confirmation lure ({len(fired)} phrase(s)) — "
+                "phrasing legitimate password-reset mail never uses",
+                ", ".join(fired[:4]),
+            )
+        )
 
 
 def _check_spam_sales(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
     text = _haystack(parsed)
     fired = [kw for kw in SPAM_SALES_KEYWORDS if kw in text]
     if fired:
-        signals.append(_signal(
-            "spam_sales_language", W_MED,
-            f"Spam/sales language detected ({len(fired)} phrase(s))",
-            ", ".join(fired[:5]),
-        ))
+        signals.append(
+            _signal(
+                "spam_sales_language",
+                W_MED,
+                f"Spam/sales language detected ({len(fired)} phrase(s))",
+                ", ".join(fired[:5]),
+            )
+        )
 
 
 def _check_generic_greeting(parsed: ParsedEmail, signals: List[Dict[str, Any]]) -> None:
-    first_lines = (parsed.text_body or
-                   re.sub(r"<[^>]+>", " ", parsed.html_body))
+    first_lines = parsed.text_body or re.sub(r"<[^>]+>", " ", parsed.html_body)
     head = "\n".join(first_lines.splitlines()[:6]).lower()
     hit = next((g for g in GENERIC_GREETINGS if g in head), None)
     if hit:
-        signals.append(_signal(
-            "generic_greeting", W_LOW,
-            f"Generic greeting '{hit}' detected",
-            hit,
-        ))
+        signals.append(
+            _signal(
+                "generic_greeting",
+                W_LOW,
+                f"Generic greeting '{hit}' detected",
+                hit,
+            )
+        )
 
 
-def _check_link_count(parsed: ParsedEmail, iocs: Dict[str, Any],
-                      signals: List[Dict[str, Any]]) -> None:
+def _check_link_count(
+    parsed: ParsedEmail, iocs: Dict[str, Any], signals: List[Dict[str, Any]]
+) -> None:
     urls = all_urls(iocs)
     if len(urls) > LINK_COUNT_THRESHOLD:
-        signals.append(_signal(
-            "link_count_high", W_LOW,
-            f"High link count ({len(urls)} URLs)",
-            f"{len(urls)} unique URLs",
-        ))
+        signals.append(
+            _signal(
+                "link_count_high",
+                W_LOW,
+                f"High link count ({len(urls)} URLs)",
+                f"{len(urls)} unique URLs",
+            )
+        )
 
 
 def _shannon_entropy(text: str) -> float:
@@ -639,8 +1065,9 @@ def _shannon_entropy(text: str) -> float:
     return -sum((c / total) * log2(c / total) for c in counts.values())
 
 
-def _check_domain_entropy(parsed: ParsedEmail, iocs: Dict[str, Any],
-                          signals: List[Dict[str, Any]]) -> None:
+def _check_domain_entropy(
+    parsed: ParsedEmail, iocs: Dict[str, Any], signals: List[Dict[str, Any]]
+) -> None:
     from .iocs import all_domains
 
     seen: set = set()
@@ -658,11 +1085,14 @@ def _check_domain_entropy(parsed: ParsedEmail, iocs: Dict[str, Any],
         entropy = _shannon_entropy(sld)
         high_tld = tld in {"xyz", "top", "info", "online", "site", "click"}
         if entropy >= ENTROPY_THRESHOLD or (entropy >= 3.0 and high_tld):
-            signals.append(_signal(
-                "domain_high_entropy", W_MEDHIGH,
-                f"Domain '{domain}' has high character entropy ({entropy:.2f})",
-                f"domain={domain} sld_entropy={entropy:.2f} tld={tld}",
-            ))
+            signals.append(
+                _signal(
+                    "domain_high_entropy",
+                    W_MEDHIGH,
+                    f"Domain '{domain}' has high character entropy ({entropy:.2f})",
+                    f"domain={domain} sld_entropy={entropy:.2f} tld={tld}",
+                )
+            )
 
 
 def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
@@ -675,6 +1105,8 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
         _check_display_name(parsed, signals)
         _check_message_id_date(parsed, signals)
         _check_origin_ip(parsed, signals)
+        _check_reply_chain(parsed, signals)
+        _check_received_chain(parsed, signals)
     _check_urls(parsed, iocs, signals)
     _check_link_text_mismatch(parsed, signals)
     _check_domain_entropy(parsed, iocs, signals)
@@ -690,6 +1122,7 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
     _check_attachments(parsed, signals)
     _check_urgency(parsed, signals)
     _check_base64_blobs(parsed, signals)
+    _check_mailer(parsed, signals)
 
     # deduplicate identical signals
     seen: set = set()
@@ -703,9 +1136,12 @@ def analyze_signals(parsed: ParsedEmail) -> Dict[str, Any]:
     # correlation bonus for multiple distinct signals
     lure_ids = {s["id"] for s in unique}
     if len(lure_ids) >= CORRELATION_MIN_SIGNALS:
-        unique.append(_signal(
-            "lure_signal_correlation", CORRELATION_BONUS,
-            f"{len(lure_ids)} distinct signals fired together",
-            f"signals: {', '.join(sorted(lure_ids)[:6])}",
-        ))
+        unique.append(
+            _signal(
+                "lure_signal_correlation",
+                CORRELATION_BONUS,
+                f"{len(lure_ids)} distinct signals fired together",
+                f"signals: {', '.join(sorted(lure_ids)[:6])}",
+            )
+        )
     return {"signals": unique, "iocs": iocs}

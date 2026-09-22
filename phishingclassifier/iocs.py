@@ -12,9 +12,7 @@ IPv4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
     r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
 )
-IPv6_RE = re.compile(
-    r"\b(?:[0-9a-fA-F]{0,4}:){2,7}(?:[0-9a-fA-F]{0,4}|(?:\d{1,3}\.){3}\d{1,3})\b"
-)
+IPv6_RE = re.compile(r"\b(?:[0-9a-fA-F]{0,4}:){2,7}(?:[0-9a-fA-F]{0,4}|(?:\d{1,3}\.){3}\d{1,3})\b")
 DOMAIN_RE = re.compile(
     r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)"
     r"+(?:aero|biz|cat|com|coop|edu|gov|info|int|mil|museum|net|org|pro|xyz"
@@ -30,18 +28,20 @@ URL_HOST_RE = re.compile(
     r"(?::\d{1,5})?(?:[/?#\s]|\b)",
     re.IGNORECASE,
 )
-URL_RE = re.compile(
-    r"\b(?:https?|ftp)://[^\s<>\"'()\[\]{}]+", re.IGNORECASE
-)
-EMAIL_RE = re.compile(
-    r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"
-)
+URL_RE = re.compile(r"\b(?:https?|ftp)://[^\s<>\"'()\[\]{}]+", re.IGNORECASE)
+EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b")
 
 # benign domains to ignore
 LEGIT_DOMAINS = {
-    "w3.org", "www.w3.org", "schemas.xmlsoap.org",
-    "example.com", "example.net", "example.org",
-    "example.edu", "mail.example.com", "www.example.com",
+    "w3.org",
+    "www.w3.org",
+    "schemas.xmlsoap.org",
+    "example.com",
+    "example.net",
+    "example.org",
+    "example.edu",
+    "mail.example.com",
+    "www.example.com",
 }
 
 # test fixture IP ranges
@@ -75,9 +75,7 @@ def _ips_from(text: str, skip_internal: bool = False) -> List[str]:
 
 def extract_iocs(parsed: ParsedEmail) -> Dict[str, Any]:
     """Extract IOCs from parsed email headers and body."""
-    header_blob = "\n".join(
-        f"{k}: {v}" for k, v in parsed.headers.items()
-    )
+    header_blob = "\n".join(f"{k}: {v}" for k, v in parsed.headers.items())
     body_blob = "\n".join([parsed.text_body, parsed.html_body])
 
     domains_header = extract_domains(header_blob)
@@ -117,8 +115,7 @@ def extract_iocs(parsed: ParsedEmail) -> Dict[str, Any]:
             "body": emails_body,
         },
         "attachment_hashes": [
-            {"sha256": a["sha256"], "filename": a["filename"]}
-            for a in parsed.attachments
+            {"sha256": a["sha256"], "filename": a["filename"]} for a in parsed.attachments
         ],
     }
 

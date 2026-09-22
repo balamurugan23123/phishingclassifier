@@ -2,32 +2,69 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE = MODEL_DIR / "phish_model.joblib"
-MAX_TFIDF_FEATURES = 300
+# Character n-grams: less sensitive to era/corpus-specific word choice than
+# word n-grams — the leave-one-corpus-out experiment showed word vectors
+# memorize corpus fingerprints. 3-5 chars capture morphology + phrasing.
+MAX_TFIDF_FEATURES = 6000
+CHAR_NGRAM_RANGE = (3, 5)
 # Below this row count gradient boosting cannot learn (each leaf needs
 # samples); the trainer switches to logistic regression instead.
 SMALL_DATA_ROWS = 200
+# Above this row count the dense matrix gradient boosting needs stops
+# fitting in RAM (160k x 6.6k x 8B ~ 8.5GB); the trainer switches to
+# sparse-native logistic regression with MaxAbs-scaled engineered features.
+DENSE_MAX_ROWS = 25000
 
 KNOWN_SIGNAL_IDS = [
-    "spf_fail", "dkim_fail", "dmarc_fail", "auth_header_absent",
-    "auth_none", "return_path_mismatch", "reply_to_mismatch",
-    "display_name_spoof", "message_id_absent", "date_future", "date_stale",
-    "origin_ip_internal", "url_ip_literal", "url_punycode",
-    "url_shortener", "url_nonstandard_port", "url_deep_subdomains",
-    "lookalike_domain", "domain_high_entropy", "link_text_mismatch",
-    "credential_form", "dangerous_attachment", "passworded_archive",
-    "urgency_keywords", "money_scam_language", "spam_sales_language",
-    "free_webmail_impersonation", "generic_greeting", "link_count_high",
-    "base64_blob", "lure_signal_correlation", "brand_lookalike_fuzzy",
-    "vt_malicious_verdict", "urlscan_malicious_verdict",
-    "webmail_brand_impersonation", "reply_to_identity_divergence",
-    "advance_fee_structure", "irreversible_payment_request",
-    "windfall_claim", "credential_lure_language",
+    "spf_fail",
+    "dkim_fail",
+    "dmarc_fail",
+    "auth_header_absent",
+    "auth_none",
+    "return_path_mismatch",
+    "reply_to_mismatch",
+    "display_name_spoof",
+    "message_id_absent",
+    "date_future",
+    "date_stale",
+    "origin_ip_internal",
+    "url_ip_literal",
+    "url_punycode",
+    "url_shortener",
+    "url_nonstandard_port",
+    "url_deep_subdomains",
+    "lookalike_domain",
+    "domain_high_entropy",
+    "link_text_mismatch",
+    "credential_form",
+    "dangerous_attachment",
+    "passworded_archive",
+    "urgency_keywords",
+    "money_scam_language",
+    "spam_sales_language",
+    "free_webmail_impersonation",
+    "generic_greeting",
+    "link_count_high",
+    "base64_blob",
+    "lure_signal_correlation",
+    "brand_lookalike_fuzzy",
+    "vt_malicious_verdict",
+    "urlscan_malicious_verdict",
+    "webmail_brand_impersonation",
+    "reply_to_identity_divergence",
+    "advance_fee_structure",
+    "irreversible_payment_request",
+    "windfall_claim",
+    "credential_lure_language",
 ]
 
 _MODEL_CACHE: Dict[str, Any] = {}
@@ -35,9 +72,20 @@ _NORM_TABLE: Dict[str, str] = {}
 
 # character substitutions
 _LEET_MAP = {
-    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
-    "8": "b", "9": "g", "@": "a", "$": "s", "!": "i",
-    "|": "l", "€": "e", "£": "l",
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+    "@": "a",
+    "$": "s",
+    "!": "i",
+    "|": "l",
+    "€": "e",
+    "£": "l",
 }
 
 
@@ -46,10 +94,28 @@ def build_norm_table() -> Dict[str, str]:
         return _NORM_TABLE
     table: Dict[str, str] = dict(_LEET_MAP)
     extra = {
-        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
-        "у": "y", "ѕ": "s", "і": "i", "ј": "j", "һ": "h", "ԁ": "d",
-        "ο": "o", "α": "a", "ε": "e", "ι": "i", "κ": "k", "ρ": "p",
-        "ϲ": "c", "ν": "v", "τ": "t", "υ": "u",
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "у": "y",
+        "ѕ": "s",
+        "і": "i",
+        "ј": "j",
+        "һ": "h",
+        "ԁ": "d",
+        "ο": "o",
+        "α": "a",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "ρ": "p",
+        "ϲ": "c",
+        "ν": "v",
+        "τ": "t",
+        "υ": "u",
     }
     table.update(extra)
     _NORM_TABLE.update(table)
@@ -89,8 +155,9 @@ def levenshtein(a: str, b: str, cap: int = 2) -> int:
     return prev[-1]
 
 
-def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
-                    max_distance: int = 2) -> Optional[str]:
+def fuzzy_brand_hit(
+    host: str, brands: Optional[Dict[str, list]] = None, max_distance: int = 2
+) -> Optional[str]:
     """Return the brand token if host is a near-miss of a known brand.
 
     Checks each dot/hyphen-separated label of the host (normalized for
@@ -105,21 +172,38 @@ def fuzzy_brand_hit(host: str, brands: Optional[Dict[str, list]] = None,
     if not host:
         return None
     host_l = host.lower().rstrip(".")
-    # genuine brand domain -> never a lookalike
+    # genuine brand domain (or a subdomain of one) -> never a lookalike
     for legit in brands.values():
-        if host_l in [d.lower() for d in legit]:
-            return None
-    generic = {"www", "mail", "login", "secure", "verify", "account",
-              "accounts", "portal", "auth", "id", "support", "signin",
-              "email", "webmail", "smtp", "imap", "mx"}
+        for d in legit:
+            dl = d.lower()
+            if host_l == dl or host_l.endswith("." + dl):
+                return None
+    generic = {
+        "www",
+        "mail",
+        "login",
+        "secure",
+        "verify",
+        "account",
+        "accounts",
+        "portal",
+        "auth",
+        "id",
+        "support",
+        "signin",
+        "email",
+        "webmail",
+        "smtp",
+        "imap",
+        "mx",
+    }
     labels = re.split(r"[.\-]+", host_l)
     for label in labels:
         if not label or len(label) < 4 or label in generic:
             continue
         norm = normalize_confusables(label)
         for brand, legit in brands.items():
-            refs = {brand, normalize_confusables(
-                legit[0].split(".")[0])}
+            refs = {brand, normalize_confusables(legit[0].split(".")[0])}
             for ref in refs:
                 if len(ref) >= 4 and levenshtein(norm, ref, max_distance) <= max_distance:
                     return brand
@@ -130,13 +214,18 @@ def _text_for_tfidf(parsed) -> str:
     import re as _re
 
     html = _re.sub(r"<[^>]+>", " ", parsed.html_body or "")
-    return " ".join([
-        parsed.subject or "", parsed.text_body or "", html,
-    ])
+    return " ".join(
+        [
+            parsed.subject or "",
+            parsed.text_body or "",
+            html,
+        ]
+    )
 
 
-def _engineered_features(parsed, signals: List[Dict[str, Any]],
-                         iocs: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
+def _engineered_features(
+    parsed, signals: List[Dict[str, Any]], iocs: Optional[Dict[str, Any]] = None
+) -> Dict[str, float]:
     feats: Dict[str, float] = {}
     sig_counts: Dict[str, int] = {}
     weight_by_id: Dict[str, int] = {}
@@ -149,10 +238,18 @@ def _engineered_features(parsed, signals: List[Dict[str, Any]],
 
     feats["rule_score"] = float(sum(s.get("weight", 0) for s in signals))
     feats["signal_total"] = float(len(signals))
-    feats["url_count"] = float(len((iocs or {}).get("urls", {}).get("body", [])
-                                   + (iocs or {}).get("urls", {}).get("header", [])))
-    feats["domain_count"] = float(len((iocs or {}).get("domains", {}).get("body", [])
-                                       + (iocs or {}).get("domains", {}).get("header", [])))
+    feats["url_count"] = float(
+        len(
+            (iocs or {}).get("urls", {}).get("body", [])
+            + (iocs or {}).get("urls", {}).get("header", [])
+        )
+    )
+    feats["domain_count"] = float(
+        len(
+            (iocs or {}).get("domains", {}).get("body", [])
+            + (iocs or {}).get("domains", {}).get("header", [])
+        )
+    )
     feats["auth_spf_fail"] = 1.0 if (parsed.auth("spf") in ("fail", "softfail")) else 0.0
     feats["auth_dkim_fail"] = 1.0 if (parsed.auth("dkim") in ("fail", "softfail")) else 0.0
     feats["auth_dmarc_fail"] = 1.0 if (parsed.auth("dmarc") in ("fail", "softfail")) else 0.0
@@ -162,8 +259,7 @@ def _engineered_features(parsed, signals: List[Dict[str, Any]],
     feats["from_csv_row"] = 1.0 if getattr(parsed, "from_csv", False) else 0.0
     sender_dom = (parsed.from_domain or "").lower()
     feats["sender_digits_ratio"] = (
-        sum(c.isdigit() for c in sender_dom) / len(sender_dom)
-        if sender_dom else 0.0
+        sum(c.isdigit() for c in sender_dom) / len(sender_dom) if sender_dom else 0.0
     )
     feats["sender_hyphens"] = float(sender_dom.count("-"))
     return feats
@@ -194,6 +290,7 @@ def load_model():
         _MODEL_CACHE["pipeline"] = pipe
         return pipe
     except Exception:
+        logger.warning("failed to load model from %s", MODEL_FILE, exc_info=True)
         return None
 
 
@@ -208,13 +305,14 @@ def save_model(pipe) -> None:
 def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Train on [{parsed, label, source}] entries; returns eval metrics.
 
-    Design: engineered features (DictVectorizer) hstacked with TF-IDF word
-    n-grams, then a linear or boosted classifier depending on data size —
-    gradient boosting cannot learn from tiny datasets (its leaves need
-    samples), so < SMALL_DATA_ROWS uses LogisticRegression (which also
-    gives well-calibrated probabilities), larger sets use
-    HistGradientBoosting. Stratified 5-fold CV gives the honest
-    out-of-sample estimate; the final model is fit on all rows.
+    Design: engineered features (DictVectorizer) hstacked with TF-IDF char
+    n-grams, then a size-appropriate classifier:
+    - tiny (<200 rows): LogisticRegression (boosting can't learn)
+    - medium (<=25k):   HistGradientBoosting, dense matrix fits RAM
+    - large (>25k):     sparse LogisticRegression (MaxAbs-scaled) — the
+      dense matrix GBDT needs would not fit in RAM at full-corpus scale.
+    Stratified 5-fold CV gives the honest out-of-sample estimate; the
+    final model is fit on all rows.
     """
     import numpy as np
     import scipy.sparse as sp
@@ -223,11 +321,11 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     from sklearn.linear_model import LogisticRegression
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.preprocessing import MaxAbsScaler
 
     labeled = [r for r in rows if r.get("label") in (0, 1)]
     if len(labeled) < 10:
-        raise ValueError("Need >= 10 labeled rows to train (have %d)"
-                          % len(labeled))
+        raise ValueError("Need >= 10 labeled rows to train (have %d)" % len(labeled))
     classes = {r["label"] for r in labeled}
     if classes != {0, 1}:
         raise ValueError("Both classes (0 and 1) required; got %s" % classes)
@@ -246,29 +344,49 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     vec = DictVectorizer(sparse=False)
     tfidf = TfidfVectorizer(
-        ngram_range=(1, 2), max_features=MAX_TFIDF_FEATURES,
-        sublinear_tf=True, strip_accents="unicode", stop_words="english",
-        min_df=1,
+        analyzer="char_wb",
+        ngram_range=CHAR_NGRAM_RANGE,
+        max_features=MAX_TFIDF_FEATURES,
+        sublinear_tf=True,
+        strip_accents="unicode",
+        min_df=2,
+        lowercase=True,
     )
     F = vec.fit_transform(X_feats)
     T = tfidf.fit_transform(X_text)
-    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    X = sp.hstack([sp.csr_matrix(F), T]).tocsr()
     y_arr = np.array(y)
 
-    if len(labeled) < SMALL_DATA_ROWS:
+    n = len(labeled)
+    scaler = None
+    if n < SMALL_DATA_ROWS:
         clf = LogisticRegression(max_iter=2000, C=1.0, random_state=42)
         model_kind = "ml-logreg"
-    else:
+        X = X.toarray()  # tiny data: dense is trivially cheap
+    elif n <= DENSE_MAX_ROWS:
         clf = HistGradientBoostingClassifier(
-            max_iter=200, learning_rate=0.1, random_state=42,
+            max_iter=200,
+            learning_rate=0.1,
+            random_state=42,
         )
         model_kind = "ml-gbdt"
+        X = X.toarray()  # GBDT needs dense; fits RAM at this scale
+    else:
+        # Large-corpus sparse path: scale so engineered (counts, lengths)
+        # and TF-IDF ranges don't fight each other for coefficient space.
+        # saga needs iterations at 6.6k features; 10k converges for real.
+        scaler = MaxAbsScaler()
+        X = scaler.fit_transform(X)
+        clf = LogisticRegression(max_iter=10000, C=1.0, random_state=42, solver="saga", tol=1e-4)
+        model_kind = "ml-logreg-saga"
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(clf, X, y_arr, cv=cv, scoring="f1_macro")
     clf.fit(X, y_arr)
-    save_model({"vec": vec, "tfidf": tfidf, "clf": clf,
-                "kind": model_kind})
+    bundle = {"vec": vec, "tfidf": tfidf, "clf": clf, "kind": model_kind}
+    if scaler is not None:
+        bundle["scaler"] = scaler
+    save_model(bundle)
 
     return {
         "rows": len(labeled),
@@ -279,8 +397,80 @@ def train_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def classify(parsed, signals: List[Dict[str, Any]],
-             iocs: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, float]:
+    """accuracy/precision/recall/f1 for binary 0/1 labels, rounded to 4dp.
+
+    Shared by evaluate_on_datasets and the holdout script so the metric
+    definitions live in exactly one place.
+    """
+    import numpy as np
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
+    yt = np.asarray(y_true)
+    yp = np.asarray(y_pred)
+    return {
+        "accuracy": round(float((yp == yt).mean()), 4),
+        "precision": round(float(precision_score(yt, yp, zero_division=0)), 4),
+        "recall": round(float(recall_score(yt, yp, zero_division=0)), 4),
+        "f1": round(float(f1_score(yt, yp, zero_division=0)), 4),
+    }
+
+
+def evaluate_on_datasets(paths: List[str], max_rows_per_source: int = 0) -> Dict[str, Any]:
+    """Evaluate the DEPLOYED model on held-out datasets — no refitting.
+
+    This is the honesty check: the model on disk (the one the CLI and
+    dashboard use) is scored against datasets it was NOT trained on.
+    Per-source breakdown shows exactly where it fails, because a single
+    aggregate number hides class/source-specific weaknesses.
+    """
+    import scipy.sparse as sp
+
+    bundle = load_model()
+    if bundle is None or not isinstance(bundle, dict):
+        raise RuntimeError("No trained model on disk — train first.")
+    vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
+    scaler = bundle.get("scaler")
+    threshold = float(bundle.get("threshold", 0.5))
+
+    from .csv_adapter import load_csv_dataset
+    from .heuristics import analyze_signals
+
+    per_source: Dict[str, Dict[str, Any]] = {}
+    all_y: List[int] = []
+    all_p: List[int] = []
+    for path in paths:
+        rows = load_csv_dataset(path, max_rows=max_rows_per_source)
+        if not rows:
+            continue
+        y: List[int] = []
+        p: List[int] = []
+        for r in rows:
+            parsed = r["parsed"]
+            analysis = analyze_signals(parsed)
+            feats = _featurize(parsed, analysis["signals"], analysis["iocs"])
+            text = _text_for_tfidf(parsed)
+            F = vec.transform([feats])
+            T = tfidf.transform([text])
+            X = sp.hstack([sp.csr_matrix(F), T])
+            X = scaler.transform(X) if scaler is not None else X.toarray()
+            proba = clf.predict_proba(X)[0]
+            classes = list(getattr(clf, "classes_", [0, 1]))
+            idx = classes.index(1) if 1 in classes else 1
+            p_phish = float(proba[idx])
+            y.append(r["label"])
+            p.append(1 if p_phish >= threshold else 0)
+        per_source[Path(path).name] = {"rows": len(y), **classification_metrics(y, p)}
+        all_y.extend(y)
+        all_p.extend(p)
+
+    overall = {"rows": int(len(all_y)), **classification_metrics(all_y, all_p)}
+    return {"overall": overall, "per_source": per_source}
+
+
+def classify(
+    parsed, signals: List[Dict[str, Any]], iocs: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
     """Second-opinion ML verdict for one email; None when no model.
 
     Returns {probability_phishing, prediction, model} — the rule engine
@@ -292,17 +482,22 @@ def classify(parsed, signals: List[Dict[str, Any]],
     if bundle is None or not isinstance(bundle, dict):
         return None
     vec, tfidf, clf = bundle["vec"], bundle["tfidf"], bundle["clf"]
+    scaler = bundle.get("scaler")
     feats = _featurize(parsed, signals, iocs)
     text = _text_for_tfidf(parsed)
     F = vec.transform([feats])
     T = tfidf.transform([text])
-    X = sp.hstack([sp.csr_matrix(F), T]).toarray()
+    X = sp.hstack([sp.csr_matrix(F), T])
+    # inference format must mirror training: saga models got MaxAbs-scaled
+    # sparse input; logreg/gbdt models got dense unscaled input
+    X = scaler.transform(X) if scaler is not None else X.toarray()
     proba = clf.predict_proba(X)[0]
     classes = list(getattr(clf, "classes_", [0, 1]))
     idx = classes.index(1) if 1 in classes else 1
     p_phish = float(proba[idx])
+    threshold = float(bundle.get("threshold", 0.5))
     return {
         "probability_phishing": round(p_phish, 4),
-        "prediction": 1 if p_phish >= 0.5 else 0,
+        "prediction": 1 if p_phish >= threshold else 0,
         "model": bundle.get("kind", "ml"),
     }

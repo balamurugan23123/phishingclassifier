@@ -10,11 +10,24 @@ from .parser import ParsedEmail
 
 # common column names across datasets
 SUBJECT_KEYS = ["subject", "Subject", "email_subject", "title"]
-BODY_KEYS = ["body", "Body", "text", "email_body", "content", "message",
-             "text_combined", "combined_text"]
+BODY_KEYS = [
+    "body",
+    "Body",
+    "text",
+    "email_body",
+    "content",
+    "message",
+    "text_combined",
+    "combined_text",
+]
 SENDER_KEYS = ["sender", "Sender", "from", "From", "email_from", "from_addr"]
-LABEL_KEYS = ["label", "Label", "class", "Class", "type", "target",
-              "label_num", "spam"]
+LABEL_KEYS = ["label", "Label", "class", "Class", "type", "target", "label_num", "spam"]
+
+# Upper bound on a single CSV cell, in bytes. The default csv module limit is
+# ~128KB (too small for email bodies), but sys.maxsize is effectively unlimited
+# and lets a pathological cell exhaust memory -- and it overflows the C long on
+# some platforms. 10 MiB comfortably clears any real email while capping DoS.
+MAX_FIELD_BYTES = 10 * 1024 * 1024
 
 
 def _pick(row: Dict[str, str], keys: List[str]) -> str:
@@ -55,8 +68,7 @@ def row_label(row: Dict[str, str]) -> Optional[int]:
     value = raw.strip().lower()
     if value in {"1", "phishing", "phish", "spam", "yes", "true", "malicious"}:
         return 1
-    if value in {"0", "legitimate", "legit", "ham", "safe", "no", "false",
-                 "benign", "normal"}:
+    if value in {"0", "legitimate", "legit", "ham", "safe", "no", "false", "benign", "normal"}:
         return 0
     try:
         return 1 if int(value) == 1 else 0
@@ -65,10 +77,8 @@ def row_label(row: Dict[str, str]) -> Optional[int]:
 
 
 def iter_csv_rows(path: str) -> Iterable[Dict[str, str]]:
-    """Yield rows from CSV file (handles very large fields)."""
-    import sys
-
-    csv.field_size_limit(sys.maxsize)
+    """Yield rows from CSV file (handles very large, but bounded, fields)."""
+    csv.field_size_limit(MAX_FIELD_BYTES)
     p = Path(path)
     with open(p, "r", encoding="utf-8", errors="replace", newline="") as fh:
         reader = csv.DictReader(fh)
@@ -88,18 +98,20 @@ def load_csv_dataset(path: str, max_rows: int = 0) -> List[Dict[str, Any]]:
             break
         if label is None:
             continue
-        out.append({
-            "row": row,
-            "parsed": row_to_parsed(row, source=f"{Path(path).name}#row{i + 1}"),
-            "label": label,
-            "source": f"{Path(path).name}#row{i + 1}",
-        })
+        out.append(
+            {
+                "row": row,
+                "parsed": row_to_parsed(row, source=f"{Path(path).name}#row{i + 1}"),
+                "label": label,
+                "source": f"{Path(path).name}#row{i + 1}",
+            }
+        )
     return out
 
 
-def load_combined_dataset(dir_path: str, per_class: int = 0,
-                          files: Optional[List[str]] = None,
-                          max_body: int = 20000) -> List[Dict[str, Any]]:
+def load_combined_dataset(
+    dir_path: str, per_class: int = 0, files: Optional[List[str]] = None, max_body: int = 20000
+) -> List[Dict[str, Any]]:
     """Load and merge labeled datasets from a directory.
 
     - Deduplicates exact subject+body pairs across files.
@@ -126,21 +138,21 @@ def load_combined_dataset(dir_path: str, per_class: int = 0,
             if label is None:
                 continue
             subject = (row.get("subject") or row.get("Subject") or "").strip()
-            body = (row.get("body") or row.get("Body")
-                    or row.get("text_combined") or "").strip()
+            body = (row.get("body") or row.get("Body") or row.get("text_combined") or "").strip()
             if not body or len(body) > max_body:
                 continue
             key = hash((subject.lower()[:200], body.lower()[:2000]))
             if key in seen:
                 continue
             seen.add(key)
-            merged.append({
-                "row": row,
-                "parsed": row_to_parsed(
-                    row, source=f"{name}#{len(merged) + 1}"),
-                "label": label,
-                "source": f"{name}#{len(merged) + 1}",
-            })
+            merged.append(
+                {
+                    "row": row,
+                    "parsed": row_to_parsed(row, source=f"{name}#{len(merged) + 1}"),
+                    "label": label,
+                    "source": f"{name}#{len(merged) + 1}",
+                }
+            )
 
     if per_class and per_class > 0:
         phish = [m for m in merged if m["label"] == 1]
