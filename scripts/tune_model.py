@@ -24,6 +24,11 @@ This script does all three and is safe to leave running unattended:
 * **Drop-in artefact.** The saved bundle matches ``ml.load_model`` /
   ``ml.classify`` exactly (``vec``/``tfidf``/``clf``/``kind``) and adds
   ``threshold``, which those functions now honour.
+* **Auto-discovers corpora.** Every ``*.csv`` in ``samples/`` is trained on
+  except a small exclude set (the blended superset / hand sample). Drop a new
+  labelled corpus into ``samples/`` and the next run folds it into the
+  group-CV with no code edit; the checkpoint's data signature then forces a
+  fresh search since old cached F1 scores no longer apply.
 
 Hardware note: HistGradientBoosting is a CPU (OpenMP) learner -- the GPU
 is unused here. The search loop is SERIAL (no sklearn n_jobs fan-out), so
@@ -42,22 +47,27 @@ Usage (see README "Training the model"):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
+import sys
 import time
 from pathlib import Path
 
-# The six public corpora used for honest leave-one-corpus-out.  The
-# blended Kaggle superset (phishing_email.csv) and the hand sample
-# (labeled_sample.csv) are excluded to avoid train/eval overlap.
-SOURCES = [
-    "CEAS_08.csv",
-    "Enron.csv",
-    "Ling.csv",
-    "Nazario.csv",
-    "Nigerian_Fraud.csv",
-    "SpamAssasin.csv",
-]
+# Corpora always excluded from honest group-CV training: the blended Kaggle
+# superset (phishing_email.csv) overlaps the per-source files and would leak
+# train into eval, and the tiny hand sample (labeled_sample.csv) adds nothing.
+EXCLUDE_FROM_TRAIN = {"phishing_email.csv", "labeled_sample.csv"}
+
+
+def discover_sources(samples_dir: Path, exclude=EXCLUDE_FROM_TRAIN):
+    """Every labelled corpus CSV in the samples dir, minus the excluded set.
+
+    Drop a new subject/body/label CSV into ``samples/`` and it is picked up
+    automatically with no code change. Add its name to EXCLUDE_FROM_TRAIN if
+    it overlaps files already present (a blended superset), to keep the
+    group-CV honest."""
+    return sorted(p.name for p in Path(samples_dir).glob("*.csv") if p.name not in exclude)
 
 
 def _sample_params(rng: random.Random) -> dict:
@@ -210,18 +220,42 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     samples = root / "samples"
 
+    sources = discover_sources(samples)
+    if not sources:
+        print(f"No corpus CSVs found in {samples}", file=sys.stderr)
+        return 2
+    print(f"Training corpora (auto-discovered): {', '.join(sources)}")
+
+    # The checkpoint is namespaced by a data signature: a cached F1 is only
+    # valid for the exact corpus + featurisation it was computed on, so
+    # dropping in new CSVs correctly invalidates a stale resume.
+    data_sig = hashlib.sha256(
+        json.dumps(
+            {
+                "sources": sorted(sources),
+                "per_class": args.per_class,
+                "max_features": args.max_features,
+                "min_df": args.min_df,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
     cp_path = Path(args.checkpoint)
     cp_path.parent.mkdir(parents=True, exist_ok=True)
     done: dict[str, float] = {}
     if cp_path.exists():
         try:
-            done = {k: v for k, v in json.loads(cp_path.read_text(encoding="utf-8")).items()}
-            print(f"resuming: {len(done)} configs already evaluated in {cp_path}")
+            loaded = json.loads(cp_path.read_text(encoding="utf-8"))
+            if loaded.get("sig") == data_sig and isinstance(loaded.get("results"), dict):
+                done = loaded["results"]
+                print(f"resuming: {len(done)} configs already evaluated (corpus unchanged)")
+            else:
+                print("checkpoint is for a different corpus/config -- starting fresh")
         except Exception:
             done = {}
 
     print(f"Loading combined corpus (per-class={args.per_class})...")
-    rows = load_combined_dataset(str(samples), per_class=args.per_class, files=SOURCES)
+    rows = load_combined_dataset(str(samples), per_class=args.per_class, files=sources)
     n_phish = sum(1 for r in rows if r["label"] == 1)
     print(
         f"  {len(rows)} rows ({n_phish} phish / {len(rows) - n_phish} legit) "
@@ -230,9 +264,13 @@ def main() -> int:
 
     print(f"Featurising (max_features={args.max_features}, min_df={args.min_df})...")
     X, y, groups, vec, tfidf = _build_matrix(rows, args.max_features, args.min_df)
+    # StratifiedGroupKFold needs at least one held-out group per split.
+    n_groups = len(set(groups))
+    n_splits = max(2, min(args.splits, n_groups))
     print(
-        f"  matrix {X.shape[0]} x {X.shape[1]} dense float32 "
-        f"(~{X.nbytes / 1e9:.1f} GB) in {time.monotonic() - t0:.0f}s"
+        f"  matrix {X.shape[0]} x {X.shape[1]} dense float32 (~{X.nbytes / 1e9:.1f} GB) "
+        f"across {n_groups} sources, {n_splits}-fold group-CV "
+        f"in {time.monotonic() - t0:.0f}s"
     )
 
     # ---- randomised search over honest group-CV F1 -----------------------
@@ -247,9 +285,11 @@ def main() -> int:
         if key in done:
             continue
         tried += 1
-        f1 = _grouped_cv_f1(X, y, groups, params, args.splits)
+        f1 = _grouped_cv_f1(X, y, groups, params, n_splits)
         done[key] = f1
-        cp_path.write_text(json.dumps(done, indent=2), encoding="utf-8")
+        cp_path.write_text(
+            json.dumps({"sig": data_sig, "results": done}, indent=2), encoding="utf-8"
+        )
         mark = ""
         if f1 > best_f1:
             best_f1, best_cfg = f1, params
@@ -273,7 +313,7 @@ def main() -> int:
 
     # ---- threshold selection on out-of-fold probabilities ----------------
     print("Tuning decision threshold (FP control)...")
-    thr, thr_metrics = _tune_threshold(X, y, groups, best_cfg, args.splits, args.min_precision)
+    thr, thr_metrics = _tune_threshold(X, y, groups, best_cfg, n_splits, args.min_precision)
     print(f"  threshold={thr:.2f} -> {thr_metrics}")
 
     # ---- final fit on ALL rows, save drop-in bundle ----------------------
@@ -298,7 +338,8 @@ def main() -> int:
     report = {
         "rows": len(rows),
         "features": int(X.shape[1]),
-        "splits": args.splits,
+        "sources": sources,
+        "splits": n_splits,
         "configs_tried": len(done),
         "best_params": best_cfg,
         "best_group_cv_f1": round(best_f1, 4),
